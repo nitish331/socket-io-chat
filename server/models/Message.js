@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema(
   {
+    conversation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
+      required: true,
+    },
     text: {
       type: String,
       required: true,
@@ -17,7 +22,7 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-messageSchema.index({ createdAt: -1 });
+messageSchema.index({ conversation: 1, createdAt: -1 });
 
 messageSchema.methods.toClient = function () {
   const sender = this.sender?.username
@@ -26,6 +31,7 @@ messageSchema.methods.toClient = function () {
 
   return {
     id: this._id.toString(),
+    conversationId: this.conversation.toString(),
     text: this.text,
     sender,
     createdAt: this.createdAt.toISOString(),

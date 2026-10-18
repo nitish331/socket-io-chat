@@ -1,24 +1,23 @@
+import Avatar from "../Avatar";
 import Icon from "../Icon";
 
-function ChatHeader({ channel, isConnected, onOpenSidebar }) {
+function ChatHeader({ person, isConnected, onBack }) {
   return (
     <header className="chat-header">
       <button
         type="button"
-        className="icon-btn chat-menu"
-        onClick={onOpenSidebar}
-        aria-label="Open sidebar"
+        className="icon-btn chat-back"
+        onClick={onBack}
+        aria-label="Back to chats"
       >
-        <Icon name="menu" />
+        <Icon name="arrowLeft" />
       </button>
 
       <div className="chat-title">
-        <span className="chat-title-icon">
-          <Icon name="hash" size={18} strokeWidth={2.4} />
-        </span>
+        <Avatar name={person.username} size={40} />
         <div className="chat-title-text">
-          <h1>{channel.name}</h1>
-          <p>{channel.description}</p>
+          <h1>{person.username}</h1>
+          <p>@{person.username}</p>
         </div>
       </div>
 

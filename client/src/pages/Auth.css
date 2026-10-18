@@ -74,15 +74,16 @@
 .auth-preview-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0 4px 12px;
   margin-bottom: 4px;
   font-weight: 700;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.auth-preview-hash {
-  color: #a59cff;
+.auth-preview-header .avatar {
+  margin-right: 4px;
+  border-radius: 8px;
 }
 
 .auth-preview-live {

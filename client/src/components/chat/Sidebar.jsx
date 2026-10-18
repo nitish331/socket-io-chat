@@ -3,25 +3,121 @@ import Avatar from "../Avatar";
 import Icon from "../Icon";
 import Logo from "../Logo";
 import ThemeToggle from "../ThemeToggle";
+import { listTime, otherParticipant } from "../../utils/format";
+import { useUserSearch } from "./useUserSearch";
+
+function Highlight({ text, query }) {
+  const index = query ? text.indexOf(query) : -1;
+  if (index === -1) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark>{text.slice(index, index + query.length)}</mark>
+      {text.slice(index + query.length)}
+    </>
+  );
+}
+
+function ChatItem({ conversation, currentUserId, active, unread, query, onClick }) {
+  const other = otherParticipant(conversation, currentUserId);
+  const last = conversation.lastMessage;
+  const mine = last?.senderId === currentUserId;
+
+  return (
+    <li>
+      <button
+        type="button"
+        className={`chat-item ${active ? "active" : ""} ${unread ? "unread" : ""}`}
+        onClick={onClick}
+        aria-current={active ? "page" : undefined}
+      >
+        <Avatar name={other.username} size={44} />
+        <span className="chat-item-body">
+          <span className="chat-item-top">
+            <span className="chat-item-name">
+              <Highlight text={other.username} query={query} />
+            </span>
+            {last && <span className="chat-item-time">{listTime(last.createdAt)}</span>}
+          </span>
+          <span className="chat-item-bottom">
+            <span className="chat-item-preview">
+              {last ? (
+                <>
+                  {mine && <span className="chat-item-you">You: </span>}
+                  {last.text}
+                </>
+              ) : (
+                "No messages yet"
+              )}
+            </span>
+            {unread > 0 && <span className="unread-badge">{unread > 99 ? "99+" : unread}</span>}
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function PersonItem({ person, query, onClick }) {
+  return (
+    <li>
+      <button type="button" className="chat-item person" onClick={onClick}>
+        <Avatar name={person.username} size={44} />
+        <span className="chat-item-body">
+          <span className="chat-item-name">
+            <Highlight text={person.username} query={query} />
+          </span>
+          <span className="chat-item-preview">Tap to start a new chat</span>
+        </span>
+        <Icon name="newChat" size={17} className="person-action" />
+      </button>
+    </li>
+  );
+}
 
 function Sidebar({
-  channels,
-  activeChannelId,
-  onSelectChannel,
-  user,
+  conversations,
+  loading,
+  activeKey,
+  unread,
+  currentUser,
   isConnected,
+  onOpenConversation,
+  onStartChat,
   onLogout,
-  open,
-  onClose,
+  searchRef,
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visibleChannels = q
-    ? channels.filter((c) => c.name.includes(q))
-    : channels;
+  const { users, searching, error } = useUserSearch(query);
+
+  const matchingChats = q
+    ? conversations.filter((c) =>
+        otherParticipant(c, currentUser.id).username.includes(q),
+      )
+    : conversations;
+
+  const chatUserIds = new Set(
+    conversations.map((c) => otherParticipant(c, currentUser.id).id),
+  );
+  const newPeople = users.filter((u) => !chatUserIds.has(u.id));
+
+  function clearSearch() {
+    setQuery("");
+  }
+
+  function startChat(person) {
+    clearSearch();
+    onStartChat(person);
+  }
+
+  function openConversation(id) {
+    clearSearch();
+    onOpenConversation(id);
+  }
 
   return (
-    <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Workspace">
+    <aside className="sidebar" aria-label="Chats">
       <div className="sidebar-top">
         <div className="brand">
           <Logo size={30} />
@@ -29,72 +125,141 @@ function Sidebar({
         </div>
         <button
           type="button"
-          className="icon-btn sidebar-close"
-          onClick={onClose}
-          aria-label="Close sidebar"
+          className="icon-btn sidebar-icon-btn"
+          onClick={() => searchRef.current?.focus()}
+          aria-label="New chat"
+          title="New chat"
         >
-          <Icon name="x" />
+          <Icon name="newChat" />
         </button>
       </div>
 
-      <label className="sidebar-search">
+      <div className="sidebar-search">
         <Icon name="search" size={16} />
         <input
-          type="search"
-          placeholder="Search channels"
+          ref={searchRef}
+          type="text"
+          placeholder="Search or start a new chat"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && clearSearch()}
+          aria-label="Search chats and people"
+          spellCheck={false}
         />
-      </label>
+        {query && (
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => {
+              clearSearch();
+              searchRef.current?.focus();
+            }}
+            aria-label="Clear search"
+          >
+            <Icon name="x" size={14} strokeWidth={2.5} />
+          </button>
+        )}
+      </div>
 
       <nav className="sidebar-nav">
-        <section className="sidebar-section">
-          <h2 className="sidebar-heading">
-            Channels
-            <span className="sidebar-count">{channels.length}</span>
-          </h2>
-          <ul>
-            {visibleChannels.map((channel) => (
-              <li key={channel.id}>
-                <button
-                  type="button"
-                  className={`sidebar-item ${
-                    channel.id === activeChannelId ? "active" : ""
-                  }`}
-                  onClick={() => onSelectChannel(channel.id)}
-                  aria-current={channel.id === activeChannelId ? "page" : undefined}
-                >
-                  <Icon name="hash" size={16} />
-                  <span className="sidebar-item-label">{channel.name}</span>
-                </button>
-              </li>
-            ))}
-            {visibleChannels.length === 0 && (
-              <li className="sidebar-empty">No channels match “{query}”</li>
+        {!q && (
+          <>
+            <h2 className="sidebar-heading">Chats</h2>
+            {loading && conversations.length === 0 ? (
+              <ul className="chat-skeletons" aria-hidden="true">
+                {[0, 1, 2].map((i) => (
+                  <li key={i} className="chat-skeleton">
+                    <span className="sk-avatar" />
+                    <span className="sk-lines">
+                      <span />
+                      <span />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : conversations.length === 0 ? (
+              <div className="sidebar-empty-state">
+                <Icon name="message" size={22} />
+                <p className="title">No chats yet</p>
+                <p>Search for someone by username above to start your first conversation.</p>
+              </div>
+            ) : (
+              <ul className="chat-list">
+                {conversations.map((c) => (
+                  <ChatItem
+                    key={c.id}
+                    conversation={c}
+                    currentUserId={currentUser.id}
+                    active={c.id === activeKey}
+                    unread={unread[c.id] || 0}
+                    onClick={() => openConversation(c.id)}
+                  />
+                ))}
+              </ul>
             )}
-          </ul>
-        </section>
+          </>
+        )}
 
-        <section className="sidebar-section">
-          <h2 className="sidebar-heading">Direct messages</h2>
-          <div className="sidebar-placeholder">
-            <Icon name="message" size={16} />
-            <span>No conversations yet</span>
-          </div>
-        </section>
+        {q && (
+          <>
+            {matchingChats.length > 0 && (
+              <>
+                <h2 className="sidebar-heading">Chats</h2>
+                <ul className="chat-list">
+                  {matchingChats.map((c) => (
+                    <ChatItem
+                      key={c.id}
+                      conversation={c}
+                      currentUserId={currentUser.id}
+                      active={c.id === activeKey}
+                      unread={unread[c.id] || 0}
+                      query={q}
+                      onClick={() => openConversation(c.id)}
+                    />
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <h2 className="sidebar-heading">
+              People
+              {searching && <span className="mini-spinner" aria-label="Searching" />}
+            </h2>
+            {error ? (
+              <p className="sidebar-note error">{error}</p>
+            ) : newPeople.length > 0 ? (
+              <ul className="chat-list">
+                {newPeople.map((person) => (
+                  <PersonItem
+                    key={person.id}
+                    person={person}
+                    query={q}
+                    onClick={() => startChat(person)}
+                  />
+                ))}
+              </ul>
+            ) : (
+              !searching && (
+                <p className="sidebar-note">
+                  {matchingChats.length > 0
+                    ? "No one else matches"
+                    : `No one found for “${query.trim()}”`}
+                </p>
+              )
+            )}
+          </>
+        )}
       </nav>
 
       <div className="sidebar-footer">
         <Avatar
-          name={user.username}
+          name={currentUser.username}
           size={36}
           status={isConnected ? "online" : "offline"}
         />
         <div className="sidebar-me">
-          <span className="sidebar-me-name">{user.username}</span>
-          <span className="sidebar-me-status">
-            {isConnected ? "Active" : "Offline"}
-          </span>
+          <span className="sidebar-me-name">{currentUser.username}</span>
+          <span className="sidebar-me-status">{isConnected ? "Active" : "Offline"}</span>
         </div>
         <ThemeToggle className="icon-btn sidebar-icon-btn" />
         <button

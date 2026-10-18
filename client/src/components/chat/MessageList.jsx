@@ -37,7 +37,7 @@ function buildRows(items) {
   return rows;
 }
 
-function MessageList({ items, currentUserId, channelName }) {
+function MessageList({ items, currentUserId, intro, loading, showAuthors = true }) {
   const listRef = useRef(null);
   const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -76,17 +76,12 @@ function MessageList({ items, currentUserId, channelName }) {
   return (
     <div className="messages-wrap">
       <div className="messages" ref={listRef} onScroll={handleScroll}>
-        {messageCount === 0 && (
-          <div className="channel-intro">
-            <div className="channel-intro-icon">
-              <Icon name="hash" size={30} strokeWidth={2.4} />
-            </div>
-            <h2>Welcome to #{channelName}</h2>
-            <p>
-              This is the very beginning of the <strong>#{channelName}</strong>{" "}
-              channel. Say hello and get the conversation going.
-            </p>
+        {loading ? (
+          <div className="messages-loading" role="status" aria-label="Loading messages">
+            <span className="spinner" />
           </div>
+        ) : (
+          messageCount === 0 && intro
         )}
 
         <ul className="message-rows">
@@ -118,13 +113,13 @@ function MessageList({ items, currentUserId, channelName }) {
                   last ? "last" : ""
                 }`}
               >
-                {!mine && (
+                {!mine && showAuthors && (
                   <div className="msg-avatar">
                     {first && <Avatar name={name} size={34} />}
                   </div>
                 )}
                 <div className="msg-content">
-                  {first && !mine && (
+                  {first && !mine && showAuthors && (
                     <div className="msg-author" style={{ color: avatarColor(name) }}>
                       {name}
                     </div>

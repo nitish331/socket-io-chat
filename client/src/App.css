@@ -1,16 +1,31 @@
-.app {
-  max-width: 600px;
-  margin: 60px auto;
-  padding: 0 16px;
-  text-align: center;
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100svh;
+  max-width: 900px;
+  margin: 0 auto;
+  border-inline: 1px solid #e5e5e5;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.chat-header h1 {
+  font-size: 18px;
+  margin: 0;
 }
 
 .status {
-  display: inline-block;
-  padding: 6px 14px;
+  padding: 4px 12px;
   border-radius: 999px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 16px;
 }
 
 .status.online {
@@ -23,7 +38,91 @@
   color: #b42318;
 }
 
-.welcome {
-  margin-top: 16px;
-  font-style: italic;
+.message-list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.message:hover {
+  background: #f8f8f8;
+}
+
+.message.mine .sender {
+  color: #1264a3;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sender {
+  font-weight: 700;
+}
+
+.time {
+  font-size: 12px;
+  color: #888;
+}
+
+.text {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.system {
+  text-align: center;
+  font-size: 13px;
+  color: #888;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.composer input {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.composer button {
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: #007a5a;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  background: #9bbfb3;
+  cursor: not-allowed;
+}
+
+.error {
+  margin: 0;
+  padding: 0 16px 12px;
+  color: #b42318;
+  font-size: 13px;
 }

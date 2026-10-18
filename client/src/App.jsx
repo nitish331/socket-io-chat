@@ -31,6 +31,7 @@ function App() {
     function onConnect() {
       setIsConnected(true);
       setSocketId(socket.id);
+      setItems([]);
     }
 
     function onDisconnect() {
@@ -46,6 +47,17 @@ function App() {
       setItems((prev) => [...prev, { type: "message", ...message }]);
     }
 
+    function onMessageHistory(history) {
+      setItems((prev) => {
+        const historyIds = new Set(history.map((m) => m.id));
+        const arrivedMeanwhile = prev.filter((i) => !historyIds.has(i.id));
+        return [
+          ...history.map((m) => ({ type: "message", ...m })),
+          ...arrivedMeanwhile,
+        ];
+      });
+    }
+
     function onUserJoined({ userId }) {
       addSystem(`User ${shortId(userId)} joined`);
     }
@@ -58,6 +70,7 @@ function App() {
     socket.on("disconnect", onDisconnect);
     socket.on("welcome", onWelcome);
     socket.on("receive_message", onReceiveMessage);
+    socket.on("message_history", onMessageHistory);
     socket.on("user_joined", onUserJoined);
     socket.on("user_left", onUserLeft);
 
@@ -68,6 +81,7 @@ function App() {
       socket.off("disconnect", onDisconnect);
       socket.off("welcome", onWelcome);
       socket.off("receive_message", onReceiveMessage);
+      socket.off("message_history", onMessageHistory);
       socket.off("user_joined", onUserJoined);
       socket.off("user_left", onUserLeft);
       socket.disconnect();

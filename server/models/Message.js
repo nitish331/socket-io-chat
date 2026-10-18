@@ -8,8 +8,9 @@ const messageSchema = new mongoose.Schema(
       trim: true,
       maxlength: 2000,
     },
-    senderId: {
-      type: String,
+    sender: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
     },
   },
@@ -19,10 +20,14 @@ const messageSchema = new mongoose.Schema(
 messageSchema.index({ createdAt: -1 });
 
 messageSchema.methods.toClient = function () {
+  const sender = this.sender?.username
+    ? { id: this.sender._id.toString(), username: this.sender.username }
+    : { id: null, username: "deleted user" };
+
   return {
     id: this._id.toString(),
     text: this.text,
-    senderId: this.senderId,
+    sender,
     createdAt: this.createdAt.toISOString(),
   };
 };

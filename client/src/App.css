@@ -1,0 +1,29 @@
+.app {
+  max-width: 600px;
+  margin: 60px auto;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.status {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.status.online {
+  background: #e3f6ea;
+  color: #1a7f45;
+}
+
+.status.offline {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.welcome {
+  margin-top: 16px;
+  font-style: italic;
+}

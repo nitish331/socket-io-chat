@@ -56,6 +56,13 @@ const PATHS = {
     </>
   ),
   arrowDown: <path d="M12 5v14M19 12l-7 7-7-7" />,
+  arrowLeft: <path d="M19 12H5M12 19l-7-7 7-7" />,
+  newChat: (
+    <>
+      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z" />
+    </>
+  ),
   message: (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   ),

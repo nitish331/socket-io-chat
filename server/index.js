@@ -5,6 +5,8 @@ import { Server } from "socket.io";
 import cors from "cors";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.js";
+import userRoutes from "./routes/users.js";
+import conversationRoutes from "./routes/conversations.js";
 import { socketAuth } from "./middleware/auth.js";
 import { registerChatHandlers } from "./socket/chat.js";
 
@@ -22,6 +24,8 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/conversations", conversationRoutes);
 
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "Not found" });

@@ -1,4 +1,8 @@
-import { SERVER_URL } from "./config";
+import { SERVER_URL, TOKEN_KEY } from "./config";
+
+export function authRequest(path, options = {}) {
+  return apiRequest(path, { ...options, token: localStorage.getItem(TOKEN_KEY) });
+}
 
 export async function apiRequest(path, { method = "GET", body, token } = {}) {
   const headers = {};

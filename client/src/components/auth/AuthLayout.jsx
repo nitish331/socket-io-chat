@@ -27,23 +27,24 @@ function AuthLayout({ title, subtitle, children }) {
         </div>
 
         <div className="auth-hero-copy">
-          <h2>Where your team&apos;s conversations come alive.</h2>
+          <h2>Conversations that feel instant.</h2>
           <p>
-            Real-time channels, instant delivery and a calm, focused space to
-            talk — built on Socket.io.
+            Find anyone by username, start a chat in one tap, and watch
+            messages land in real time — built on Socket.io.
           </p>
         </div>
 
         <div className="auth-preview">
           <div className="auth-preview-header">
-            <span className="auth-preview-hash">#</span> general
+            <Avatar name="priya" size={26} />
+            priya
             <span className="auth-preview-live">
               <span /> Live
             </span>
           </div>
-          <PreviewBubble name="priya" text="Deploy is green 🚀" delay={150} />
-          <PreviewBubble name="arjun_dev" text="Nice! Shipping the release notes now" delay={550} />
-          <PreviewBubble mine text="Great work everyone 🙌" delay={950} />
+          <PreviewBubble name="priya" text="Are we still on for the demo? 🚀" delay={150} />
+          <PreviewBubble mine text="Yes! Sharing the link in a minute" delay={550} />
+          <PreviewBubble name="priya" text="Perfect, see you there 🙌" delay={950} />
         </div>
       </aside>
 

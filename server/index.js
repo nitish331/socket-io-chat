@@ -4,13 +4,14 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { connectDB } from "./config/db.js";
-import { Message } from "./models/Message.js";
+import authRoutes from "./routes/auth.js";
+import { socketAuth } from "./middleware/auth.js";
+import { registerChatHandlers } from "./socket/chat.js";
 
 dotenv.config({ quiet: true });
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
-const HISTORY_LIMIT = 50;
 
 const app = express();
 app.use(cors({ origin: CLIENT_URL }));
@@ -20,61 +21,31 @@ app.get("/", (req, res) => {
   res.send("Chat server is running");
 });
 
+app.use("/api/auth", authRoutes);
+
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "Something went wrong" });
+});
+
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: { origin: CLIENT_URL },
 });
 
-io.on("connection", async (socket) => {
-  console.log(`User connected: ${socket.id}`);
-
-  socket.broadcast.emit("user_joined", { userId: socket.id });
-
-  socket.on("send_message", async (data, callback) => {
-    const text = typeof data?.text === "string" ? data.text.trim() : "";
-
-    if (!text) {
-      return callback?.({ ok: false, error: "Message cannot be empty" });
-    }
-    if (text.length > 2000) {
-      return callback?.({ ok: false, error: "Message is too long" });
-    }
-
-    try {
-      const saved = await Message.create({ text, senderId: socket.id });
-      io.emit("receive_message", saved.toClient());
-      callback?.({ ok: true });
-    } catch (err) {
-      console.error("Failed to save message:", err.message);
-      callback?.({ ok: false, error: "Could not save message" });
-    }
-  });
-
-  socket.on("disconnect", (reason) => {
-    console.log(`User disconnected: ${socket.id} (${reason})`);
-    socket.broadcast.emit("user_left", { userId: socket.id });
-  });
-
-  try {
-    const latest = await Message.find()
-      .sort({ createdAt: -1 })
-      .limit(HISTORY_LIMIT);
-    socket.emit(
-      "message_history",
-      latest.reverse().map((m) => m.toClient()),
-    );
-  } catch (err) {
-    console.error("Failed to load history:", err.message);
-  }
-
-  socket.emit("welcome", {
-    message: "Welcome to the chat server!",
-  });
-});
+io.use(socketAuth);
+registerChatHandlers(io);
 
 async function start() {
   try {
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is missing. Add it to server/.env");
+    }
     await connectDB(process.env.MONGO_URI);
     httpServer.listen(PORT, () => {
       console.log(`Server listening on http://localhost:${PORT}`);

@@ -12,7 +12,19 @@ import Logo from "../components/Logo";
 import { mergeReceipts, otherParticipant, receiptOf } from "../utils/format";
 import "./Chat.css";
 
-const EMPTY_THREAD = { conversationId: null, items: [], loaded: true, error: "" };
+const EMPTY_THREAD = {
+  conversationId: null,
+  items: [],
+  loaded: true,
+  error: "",
+  hasMore: false,
+  loadingOlder: false,
+  olderError: "",
+};
+
+function newThread(conversationId, items = []) {
+  return { ...EMPTY_THREAD, conversationId, items, loaded: false };
+}
 const TYPING_TIMEOUT_MS = 5000;
 
 function upsertConversation(list, conversation) {
@@ -83,10 +95,13 @@ function Chat() {
   const [presence, setPresence] = useState({});
   const [typingIn, setTypingIn] = useState({});
   const [pageVisible, setPageVisible] = useState(isPageVisible);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [notice, setNotice] = useState("");
   const searchRef = useRef(null);
   const activeIdRef = useRef(null);
   const watchedRef = useRef(new Set());
   const lastReadMarkRef = useRef("");
+  const loadingOlderRef = useRef(false);
 
   const watchPresence = useCallback((userIds) => {
     const fresh = userIds.filter((id) => id && !watchedRef.current.has(id));
@@ -225,6 +240,38 @@ function Chat() {
       }
     }
 
+    function onMessageUpdated({ message, conversation }) {
+      const updated = { type: "message", ...message };
+
+      setThread((prev) => {
+        if (prev.conversationId !== message.conversationId) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((i) => {
+            if (i.id === message.id) return updated;
+            if (message.deleted && i.replyTo?.id === message.id) {
+              return { ...i, replyTo: { ...i.replyTo, deleted: true, text: "" } };
+            }
+            return i;
+          }),
+        };
+      });
+
+      if (message.deleted) {
+        setReplyingTo((prev) => (prev?.id === message.id ? null : prev));
+      }
+
+      if (conversation) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversation.id
+              ? { ...conversation, receipts: mergeReceipts(c.receipts, conversation.receipts) }
+              : c,
+          ),
+        );
+      }
+    }
+
     function onReceipt(receipt) {
       setConversations((prev) =>
         prev.map((c) =>
@@ -249,6 +296,7 @@ function Chat() {
     socket.on("presence", onPresence);
     socket.on("typing", onTyping);
     socket.on("receipt", onReceipt);
+    socket.on("message_updated", onMessageUpdated);
 
     socket.connect();
 
@@ -260,6 +308,7 @@ function Chat() {
       socket.off("presence", onPresence);
       socket.off("typing", onTyping);
       socket.off("receipt", onReceipt);
+      socket.off("message_updated", onMessageUpdated);
       typingTimers.forEach(clearTimeout);
       socket.disconnect();
     };
@@ -274,7 +323,13 @@ function Chat() {
         if (cancelled) return;
         setThread((prev) =>
           prev.conversationId === activeConversationId
-            ? { ...prev, items: mergeMessages(data.messages, prev.items), loaded: true, error: "" }
+            ? {
+                ...prev,
+                items: mergeMessages(data.messages, prev.items),
+                hasMore: prev.loaded ? prev.hasMore : data.hasMore,
+                loaded: true,
+                error: "",
+              }
             : prev,
         );
       })
@@ -344,12 +399,68 @@ function Chat() {
     document.title = total > 0 ? `(${total}) Relay` : "Relay";
   }, [unread]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  function emitAction(event, payload) {
+    socket.timeout(5000).emit(event, payload, (err, response) => {
+      if (err) setNotice("Server didn't respond. Try again.");
+      else if (!response?.ok) setNotice(response?.error ?? "Something went wrong");
+    });
+  }
+
+  function reactToMessage(messageId, emoji) {
+    emitAction("react", { messageId, emoji });
+  }
+
+  function deleteMessage(messageId) {
+    emitAction("delete_message", { messageId });
+  }
+
   function openConversation(id) {
+    setReplyingTo(null);
     setActive({ conversationId: id });
     if (thread.conversationId !== id) {
-      setThread({ conversationId: id, items: [], loaded: false, error: "" });
+      setThread(newThread(id));
     }
     setUnread((prev) => withoutKey(prev, id));
+  }
+
+  async function loadOlder() {
+    const conversationId = thread.conversationId;
+    const oldest = thread.items.find((i) => i.type === "message");
+    if (!conversationId || !oldest || !thread.hasMore || !thread.loaded) return;
+    if (loadingOlderRef.current) return;
+
+    loadingOlderRef.current = true;
+    setThread((prev) => ({ ...prev, loadingOlder: true, olderError: "" }));
+
+    try {
+      const data = await authRequest(
+        `/api/conversations/${conversationId}/messages?before=${oldest.id}`,
+      );
+      setThread((prev) =>
+        prev.conversationId === conversationId
+          ? {
+              ...prev,
+              items: mergeMessages(data.messages, prev.items),
+              hasMore: data.hasMore,
+              loadingOlder: false,
+            }
+          : prev,
+      );
+    } catch (err) {
+      setThread((prev) =>
+        prev.conversationId === conversationId
+          ? { ...prev, loadingOlder: false, olderError: err.message }
+          : prev,
+      );
+    } finally {
+      loadingOlderRef.current = false;
+    }
   }
 
   function startChat(target) {
@@ -360,43 +471,52 @@ function Chat() {
       openConversation(existing.id);
       return;
     }
+    setReplyingTo(null);
     setActive({ draftUser: target });
     setThread(EMPTY_THREAD);
   }
 
   function closeChat() {
+    setReplyingTo(null);
     setActive(null);
     setThread(EMPTY_THREAD);
   }
 
-  const sendMessage = useCallback(
-    (text) =>
-      new Promise((resolve) => {
-        const target = active?.conversationId
-          ? { conversationId: active.conversationId }
-          : { recipientId: active.draftUser.id };
+  function sendMessage(text) {
+    return new Promise((resolve) => {
+      const target = active?.conversationId
+        ? { conversationId: active.conversationId }
+        : { recipientId: active.draftUser.id };
+      const replyToId = replyingTo?.id;
 
-        socket.timeout(5000).emit("send_message", { ...target, text }, (err, response) => {
+      socket
+        .timeout(5000)
+        .emit("send_message", { ...target, text, replyToId }, (err, response) => {
           if (err) {
             resolve({ ok: false, error: "Server didn't respond. Try again." });
             return;
+          }
+          if (response.ok) {
+            setReplyingTo((prev) => (prev?.id === replyToId ? null : prev));
           }
           if (response.ok && !active.conversationId) {
             const { conversation, message } = response;
             setConversations((prev) => upsertConversation(prev, conversation));
             setActive({ conversationId: conversation.id });
-            setThread({
-              conversationId: conversation.id,
-              items: [{ type: "message", ...message }],
-              loaded: false,
-              error: "",
-            });
+            setThread(newThread(conversation.id, [{ type: "message", ...message }]));
           }
           resolve(response);
         });
-      }),
-    [active],
-  );
+    });
+  }
+
+  const replyPreview = replyingTo
+    ? {
+        id: replyingTo.id,
+        name: replyingTo.sender.id === user.id ? "yourself" : replyingTo.sender.username,
+        text: replyingTo.text,
+      }
+    : null;
 
   return (
     <div className={`workspace ${person ? "has-chat" : ""}`}>
@@ -438,6 +558,12 @@ function Chat() {
                 {thread.error}
               </div>
             )}
+            {notice && (
+              <div className="conn-banner error" role="alert">
+                <Icon name="alert" size={16} />
+                {notice}
+              </div>
+            )}
 
             <MessageList
               key={`messages-${person.id}`}
@@ -447,6 +573,14 @@ function Chat() {
               otherReceipt={receiptOf(activeConversation, user.id, { other: true })}
               typing={Boolean(activeConversationId && typingIn[activeConversationId])}
               showAuthors={false}
+              hasMore={thread.hasMore}
+              loadingOlder={thread.loadingOlder}
+              olderError={thread.olderError}
+              onLoadOlder={loadOlder}
+              onReply={setReplyingTo}
+              onReact={reactToMessage}
+              onDelete={deleteMessage}
+              onNotice={setNotice}
               intro={<ChatIntro person={person} />}
             />
 
@@ -454,6 +588,8 @@ function Chat() {
               key={`composer-${person.id}`}
               onSend={sendMessage}
               onTyping={activeConversationId ? sendTyping : undefined}
+              replyTo={replyPreview}
+              onCancelReply={() => setReplyingTo(null)}
               disabled={!isConnected}
               placeholder={isConnected ? `Message ${person.username}` : "Waiting for connection…"}
             />

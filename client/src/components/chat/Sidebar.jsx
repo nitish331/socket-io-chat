@@ -53,6 +53,11 @@ function ChatItem({
             <span className={`chat-item-preview ${typing ? "typing" : ""}`}>
               {typing ? (
                 "typing…"
+              ) : last?.deleted ? (
+                <span className="deleted-preview">
+                  <Icon name="ban" size={13} />
+                  {mine ? "You deleted this message" : "This message was deleted"}
+                </span>
               ) : last ? (
                 <>
                   {mine && (

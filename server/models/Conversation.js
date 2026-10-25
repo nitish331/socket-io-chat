@@ -16,6 +16,7 @@ const conversationSchema = new mongoose.Schema(
       text: String,
       sender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       createdAt: Date,
+      deleted: { type: Boolean, default: false },
     },
     receipts: [
       {
@@ -56,9 +57,10 @@ conversationSchema.methods.toClient = function () {
     })),
     lastMessage: this.lastMessage?.createdAt
       ? {
-          text: this.lastMessage.text,
+          text: this.lastMessage.deleted ? "" : this.lastMessage.text,
           senderId: this.lastMessage.sender.toString(),
           createdAt: this.lastMessage.createdAt.toISOString(),
+          deleted: Boolean(this.lastMessage.deleted),
         }
       : null,
     receipts: this.receipts.map(receiptToClient),

@@ -1,11 +1,11 @@
 import { isValidObjectId } from "mongoose";
 import { Conversation } from "../models/Conversation.js";
-import { Message } from "../models/Message.js";
+import { Message, MESSAGE_POPULATE } from "../models/Message.js";
 import { User } from "../models/User.js";
 import { getPresence, presenceRoom, userConnected, userDisconnected } from "./presence.js";
 import { advanceReceipt } from "./receipts.js";
-
-export const userRoom = (userId) => `user:${userId}`;
+import { registerMessageActions } from "./messageActions.js";
+import { userRoom } from "./rooms.js";
 
 const MAX_WATCHED_USERS = 200;
 
@@ -51,6 +51,8 @@ export function registerChatHandlers(io) {
     userConnected(io, user.id);
 
     const typingTargets = new Map();
+
+    registerMessageActions(io, socket);
 
     socket.on("watch_presence", async (userIds, callback) => {
       if (!Array.isArray(userIds)) {
@@ -146,20 +148,37 @@ export function registerChatHandlers(io) {
           return callback?.({ ok: false, error: "Chat not found" });
         }
 
+        let replyTo = null;
+        if (data?.replyToId) {
+          const original = isValidObjectId(data.replyToId)
+            ? await Message.exists({
+                _id: data.replyToId,
+                conversation: conversation._id,
+                deletedAt: null,
+              })
+            : null;
+          if (!original) {
+            return callback?.({ ok: false, error: "The message you're replying to is gone" });
+          }
+          replyTo = original._id;
+        }
+
         const message = await Message.create({
           conversation: conversation._id,
           sender: user.id,
           text,
+          replyTo,
         });
 
         conversation.lastMessage = {
           text,
           sender: user.id,
           createdAt: message.createdAt,
+          deleted: false,
         };
         await conversation.save();
 
-        await message.populate("sender", "username");
+        await message.populate(MESSAGE_POPULATE);
         await conversation.populate("participants", "username");
 
         const payload = {

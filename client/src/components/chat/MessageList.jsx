@@ -1,17 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import Avatar from "../Avatar";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Icon from "../Icon";
-import Ticks from "./Ticks";
-import {
-  avatarColor,
-  dayLabel,
-  formatTime,
-  isSameDay,
-  receiptStatus,
-} from "../../utils/format";
+import MessageBubble from "./MessageBubble";
+import { dayLabel, isSameDay, receiptStatus } from "../../utils/format";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const BOTTOM_THRESHOLD = 80;
+const TOP_THRESHOLD = 150;
+const FLASH_MS = 1600;
 
 function buildRows(items) {
   const rows = [];
@@ -52,33 +47,95 @@ function MessageList({
   otherReceipt = null,
   typing = false,
   showAuthors = true,
+  hasMore = false,
+  loadingOlder = false,
+  olderError = "",
+  onLoadOlder,
+  onReply,
+  onReact,
+  onDelete,
+  onNotice,
 }) {
   const listRef = useRef(null);
   const atBottomRef = useRef(true);
+  const snapshotRef = useRef({ scrollHeight: 0, scrollTop: 0, firstId: null, lastId: null });
+  const flashTimerRef = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
-  const [seenCount, setSeenCount] = useState(0);
+  const [seenAt, setSeenAt] = useState(null);
+  const [menu, setMenu] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    function onPointerDown(e) {
+      if (!e.target.closest?.(`[data-message-id="${menu.id}"]`)) setMenu(null);
+    }
+    function onKeyDown(e) {
+      if (e.key === "Escape") setMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu]);
+
+  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
+
+  function jumpTo(messageId) {
+    const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+    if (!el) {
+      onNotice?.("That message is further back — scroll up to load it.");
+      return;
+    }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlightId(messageId);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setHighlightId(null), FLASH_MS);
+  }
 
   const rows = useMemo(() => buildRows(items), [items]);
-  const messageCount = items.filter((i) => i.type === "message").length;
-  const unseen = Math.max(0, messageCount - seenCount);
+  const messages = useMemo(() => items.filter((i) => i.type === "message"), [items]);
+  const firstId = messages[0]?.id ?? null;
+  const lastId = messages.at(-1)?.id ?? null;
+  const unseen = seenAt ? messages.filter((m) => m.createdAt > seenAt).length : 0;
 
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const last = items[items.length - 1];
-    const mine = last?.type === "message" && last.sender.id === currentUserId;
-    if (atBottomRef.current || mine) {
-      el.scrollTop = el.scrollHeight;
+
+    const prev = snapshotRef.current;
+    const prepended = prev.firstId && firstId !== prev.firstId && lastId === prev.lastId;
+
+    if (prepended) {
+      el.scrollTop = prev.scrollTop + (el.scrollHeight - prev.scrollHeight);
+    } else {
+      const last = items[items.length - 1];
+      const mine = last?.type === "message" && last.sender.id === currentUserId;
+      if (atBottomRef.current || mine) el.scrollTop = el.scrollHeight;
     }
-  }, [items, currentUserId, typing]);
+
+    snapshotRef.current = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      firstId,
+      lastId,
+    };
+  }, [items, firstId, lastId, currentUserId, typing, hasMore]);
 
   function handleScroll() {
     const el = listRef.current;
-    const isBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD;
+    snapshotRef.current = { ...snapshotRef.current, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
+
+    const isBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD;
     atBottomRef.current = isBottom;
     setAtBottom(isBottom);
-    if (isBottom) setSeenCount(messageCount);
+    if (isBottom) setSeenAt(messages.at(-1)?.createdAt ?? null);
+
+    if (el.scrollTop < TOP_THRESHOLD && hasMore && !loadingOlder && !olderError) {
+      onLoadOlder?.();
+    }
   }
 
   function scrollToBottom() {
@@ -95,8 +152,25 @@ function MessageList({
           <div className="messages-loading" role="status" aria-label="Loading messages">
             <span className="spinner" />
           </div>
+        ) : hasMore ? (
+          <button
+            type="button"
+            className={`load-older ${olderError ? "error" : ""}`}
+            onClick={onLoadOlder}
+            disabled={loadingOlder}
+          >
+            {loadingOlder ? (
+              <>
+                <span className="mini-spinner" /> Loading older messages…
+              </>
+            ) : olderError ? (
+              "Couldn't load older messages — tap to retry"
+            ) : (
+              "Load older messages"
+            )}
+          </button>
         ) : (
-          messageCount === 0 && intro
+          intro
         )}
 
         <ul className="message-rows">
@@ -118,38 +192,23 @@ function MessageList({
             }
 
             const { item, first, last } = row;
-            const mine = item.sender.id === currentUserId;
-            const name = item.sender.username;
-
             return (
-              <li
+              <MessageBubble
                 key={row.id}
-                className={`msg ${mine ? "mine" : "theirs"} ${first ? "first" : ""} ${
-                  last ? "last" : ""
-                }`}
-              >
-                {!mine && showAuthors && (
-                  <div className="msg-avatar">
-                    {first && <Avatar name={name} size={34} />}
-                  </div>
-                )}
-                <div className="msg-content">
-                  {first && !mine && showAuthors && (
-                    <div className="msg-author" style={{ color: avatarColor(name) }}>
-                      {name}
-                    </div>
-                  )}
-                  <div className="bubble">
-                    <p className="bubble-text">{item.text}</p>
-                    <span className="bubble-meta">
-                      <time className="bubble-time" dateTime={item.createdAt}>
-                        {formatTime(item.createdAt)}
-                      </time>
-                      {mine && <Ticks status={receiptStatus(item.createdAt, otherReceipt)} />}
-                    </span>
-                  </div>
-                </div>
-              </li>
+                item={item}
+                first={first}
+                last={last}
+                currentUserId={currentUserId}
+                showAuthors={showAuthors}
+                status={receiptStatus(item.createdAt, otherReceipt)}
+                menuMode={menu?.id === item.id ? menu.mode : null}
+                highlighted={highlightId === item.id}
+                onMenu={(mode) => setMenu(mode ? { id: item.id, mode } : null)}
+                onReply={onReply}
+                onReact={onReact}
+                onDelete={onDelete}
+                onJumpTo={jumpTo}
+              />
             );
           })}
           {typing && (

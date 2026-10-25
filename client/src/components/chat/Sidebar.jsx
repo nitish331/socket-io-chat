@@ -18,7 +18,16 @@ function Highlight({ text, query }) {
   );
 }
 
-function ChatItem({ conversation, currentUserId, active, unread, query, onClick }) {
+function ChatItem({
+  conversation,
+  currentUserId,
+  active,
+  unread,
+  online,
+  typing,
+  query,
+  onClick,
+}) {
   const other = otherParticipant(conversation, currentUserId);
   const last = conversation.lastMessage;
   const mine = last?.senderId === currentUserId;
@@ -31,7 +40,7 @@ function ChatItem({ conversation, currentUserId, active, unread, query, onClick 
         onClick={onClick}
         aria-current={active ? "page" : undefined}
       >
-        <Avatar name={other.username} size={44} />
+        <Avatar name={other.username} size={44} status={online ? "online" : undefined} />
         <span className="chat-item-body">
           <span className="chat-item-top">
             <span className="chat-item-name">
@@ -40,8 +49,10 @@ function ChatItem({ conversation, currentUserId, active, unread, query, onClick 
             {last && <span className="chat-item-time">{listTime(last.createdAt)}</span>}
           </span>
           <span className="chat-item-bottom">
-            <span className="chat-item-preview">
-              {last ? (
+            <span className={`chat-item-preview ${typing ? "typing" : ""}`}>
+              {typing ? (
+                "typing…"
+              ) : last ? (
                 <>
                   {mine && <span className="chat-item-you">You: </span>}
                   {last.text}
@@ -80,6 +91,8 @@ function Sidebar({
   loading,
   activeKey,
   unread,
+  presence,
+  typingIn,
   currentUser,
   isConnected,
   onOpenConversation,
@@ -192,6 +205,8 @@ function Sidebar({
                     currentUserId={currentUser.id}
                     active={c.id === activeKey}
                     unread={unread[c.id] || 0}
+                    online={presence[otherParticipant(c, currentUser.id).id]?.online}
+                    typing={Boolean(typingIn[c.id])}
                     onClick={() => openConversation(c.id)}
                   />
                 ))}
@@ -213,6 +228,8 @@ function Sidebar({
                       currentUserId={currentUser.id}
                       active={c.id === activeKey}
                       unread={unread[c.id] || 0}
+                      online={presence[otherParticipant(c, currentUser.id).id]?.online}
+                      typing={Boolean(typingIn[c.id])}
                       query={q}
                       onClick={() => openConversation(c.id)}
                     />

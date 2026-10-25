@@ -54,6 +54,18 @@ export function listTime(iso) {
   return date.toLocaleDateString([], { day: "numeric", month: "short", year: "2-digit" });
 }
 
+export function lastSeenLabel(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  const now = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameDay(date, now)) return `last seen today at ${formatTime(iso)}`;
+  if (isSameDay(date, yesterday)) return `last seen yesterday at ${formatTime(iso)}`;
+  return `last seen ${date.toLocaleDateString([], { day: "numeric", month: "short" })}`;
+}
+
 export function otherParticipant(conversation, myId) {
   return (
     conversation.participants.find((p) => p.id !== myId) ?? conversation.participants[0]

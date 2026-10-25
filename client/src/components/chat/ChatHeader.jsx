@@ -1,7 +1,17 @@
 import Avatar from "../Avatar";
 import Icon from "../Icon";
+import { lastSeenLabel } from "../../utils/format";
 
-function ChatHeader({ person, isConnected, onBack }) {
+function statusText(presence, typing) {
+  if (typing) return { text: "typing…", className: "typing" };
+  if (presence?.online) return { text: "online", className: "online" };
+  if (presence?.lastSeen) return { text: lastSeenLabel(presence.lastSeen), className: "" };
+  return null;
+}
+
+function ChatHeader({ person, presence, typing, isConnected, onBack }) {
+  const status = statusText(presence, typing);
+
   return (
     <header className="chat-header">
       <button
@@ -14,10 +24,16 @@ function ChatHeader({ person, isConnected, onBack }) {
       </button>
 
       <div className="chat-title">
-        <Avatar name={person.username} size={40} />
+        <Avatar
+          name={person.username}
+          size={40}
+          status={presence?.online ? "online" : undefined}
+        />
         <div className="chat-title-text">
           <h1>{person.username}</h1>
-          <p>@{person.username}</p>
+          <p className={status?.className} aria-live="polite">
+            {status ? status.text : `@${person.username}`}
+          </p>
         </div>
       </div>
 

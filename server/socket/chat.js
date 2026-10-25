@@ -2,8 +2,11 @@ import { isValidObjectId } from "mongoose";
 import { Conversation } from "../models/Conversation.js";
 import { Message } from "../models/Message.js";
 import { User } from "../models/User.js";
+import { getPresence, presenceRoom, userConnected, userDisconnected } from "./presence.js";
 
 export const userRoom = (userId) => `user:${userId}`;
+
+const MAX_WATCHED_USERS = 200;
 
 async function findOrCreateConversation(userId, recipientId) {
   const key = Conversation.keyFor(userId, recipientId);
@@ -38,6 +41,58 @@ export function registerChatHandlers(io) {
     console.log(`${user.username} connected (${socket.id})`);
 
     socket.join(userRoom(user.id));
+    userConnected(io, user.id);
+
+    const typingTargets = new Map();
+
+    socket.on("watch_presence", async (userIds, callback) => {
+      if (!Array.isArray(userIds)) {
+        return callback?.({ ok: false, error: "Expected a list of user ids" });
+      }
+
+      const ids = [...new Set(userIds)]
+        .filter((id) => isValidObjectId(id) && id !== user.id)
+        .slice(0, MAX_WATCHED_USERS);
+
+      socket.join(ids.map(presenceRoom));
+
+      try {
+        callback?.({ ok: true, presence: await getPresence(ids) });
+      } catch (err) {
+        console.error("Failed to load presence:", err.message);
+        callback?.({ ok: false, error: "Could not load presence" });
+      }
+    });
+
+    socket.on("typing", async (data) => {
+      const conversationId = data?.conversationId;
+      if (!isValidObjectId(conversationId)) return;
+
+      let otherId = typingTargets.get(conversationId);
+      if (!otherId) {
+        try {
+          const conversation = await Conversation.findOne({
+            _id: conversationId,
+            participants: user.id,
+          })
+            .select("participants")
+            .lean();
+          if (!conversation) return;
+
+          otherId = conversation.participants.map(String).find((id) => id !== user.id);
+          typingTargets.set(conversationId, otherId);
+        } catch (err) {
+          console.error("Failed to resolve typing target:", err.message);
+          return;
+        }
+      }
+
+      io.to(userRoom(otherId)).volatile.emit("typing", {
+        conversationId,
+        userId: user.id,
+        isTyping: Boolean(data.isTyping),
+      });
+    });
 
     socket.on("send_message", async (data, callback) => {
       const text = typeof data?.text === "string" ? data.text.trim() : "";
@@ -88,6 +143,7 @@ export function registerChatHandlers(io) {
 
     socket.on("disconnect", (reason) => {
       console.log(`${user.username} disconnected (${reason})`);
+      userDisconnected(io, user.id);
     });
   });
 }

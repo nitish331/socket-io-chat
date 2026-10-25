@@ -74,6 +74,12 @@ const PATHS = {
     </>
   ),
   check: <polyline points="20 6 9 17 4 12" />,
+  checkDouble: (
+    <>
+      <path d="M18 6 7 17l-5-5" />
+      <path d="m22 10-7.5 7.5L13 16" />
+    </>
+  ),
 };
 
 function Icon({ name, size = 18, strokeWidth = 2, className = "" }) {

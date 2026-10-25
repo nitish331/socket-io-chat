@@ -1,7 +1,14 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Avatar from "../Avatar";
 import Icon from "../Icon";
-import { avatarColor, dayLabel, formatTime, isSameDay } from "../../utils/format";
+import Ticks from "./Ticks";
+import {
+  avatarColor,
+  dayLabel,
+  formatTime,
+  isSameDay,
+  receiptStatus,
+} from "../../utils/format";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const BOTTOM_THRESHOLD = 80;
@@ -37,7 +44,15 @@ function buildRows(items) {
   return rows;
 }
 
-function MessageList({ items, currentUserId, intro, loading, typing = false, showAuthors = true }) {
+function MessageList({
+  items,
+  currentUserId,
+  intro,
+  loading,
+  otherReceipt = null,
+  typing = false,
+  showAuthors = true,
+}) {
   const listRef = useRef(null);
   const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -126,9 +141,12 @@ function MessageList({ items, currentUserId, intro, loading, typing = false, sho
                   )}
                   <div className="bubble">
                     <p className="bubble-text">{item.text}</p>
-                    <time className="bubble-time" dateTime={item.createdAt}>
-                      {formatTime(item.createdAt)}
-                    </time>
+                    <span className="bubble-meta">
+                      <time className="bubble-time" dateTime={item.createdAt}>
+                        {formatTime(item.createdAt)}
+                      </time>
+                      {mine && <Ticks status={receiptStatus(item.createdAt, otherReceipt)} />}
+                    </span>
                   </div>
                 </div>
               </li>

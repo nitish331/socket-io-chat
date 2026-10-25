@@ -3,8 +3,9 @@ import Avatar from "../Avatar";
 import Icon from "../Icon";
 import Logo from "../Logo";
 import ThemeToggle from "../ThemeToggle";
-import { listTime, otherParticipant } from "../../utils/format";
+import { listTime, otherParticipant, receiptOf, receiptStatus } from "../../utils/format";
 import { useUserSearch } from "./useUserSearch";
+import Ticks from "./Ticks";
 
 function Highlight({ text, query }) {
   const index = query ? text.indexOf(query) : -1;
@@ -54,7 +55,14 @@ function ChatItem({
                 "typing…"
               ) : last ? (
                 <>
-                  {mine && <span className="chat-item-you">You: </span>}
+                  {mine && (
+                    <Ticks
+                      status={receiptStatus(
+                        last.createdAt,
+                        receiptOf(conversation, currentUserId, { other: true }),
+                      )}
+                    />
+                  )}
                   {last.text}
                 </>
               ) : (

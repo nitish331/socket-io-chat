@@ -1624,6 +1624,13 @@ kbd {
   min-width: 0;
 }
 
+.chat-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-item-group-icon {
   flex-shrink: 0;
   color: var(--sidebar-text-dim);

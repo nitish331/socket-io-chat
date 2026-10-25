@@ -92,7 +92,9 @@ function ChatItem({
           <span className="chat-item-top">
             <span className="chat-item-name">
               {group && <Icon name="users" size={14} className="chat-item-group-icon" />}
-              <Highlight text={title} query={query} />
+              <span className="chat-item-title">
+                <Highlight text={title} query={query} />
+              </span>
             </span>
             {last && <span className="chat-item-time">{listTime(last.createdAt)}</span>}
           </span>
@@ -113,7 +115,9 @@ function PersonItem({ person, query, onClick }) {
         <Avatar name={person.username} size={44} />
         <span className="chat-item-body">
           <span className="chat-item-name">
-            <Highlight text={person.username} query={query} />
+            <span className="chat-item-title">
+              <Highlight text={person.username} query={query} />
+            </span>
           </span>
           <span className="chat-item-preview">Tap to start a new chat</span>
         </span>

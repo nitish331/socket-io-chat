@@ -6,7 +6,9 @@ import { participantRooms } from "./rooms.js";
 async function findMessageForUser(messageId, userId) {
   if (!isValidObjectId(messageId)) return null;
 
-  const message = await Message.findById(messageId).select("conversation sender deletedAt createdAt");
+  const message = await Message.findById(messageId).select(
+    "conversation sender deletedAt createdAt kind",
+  );
   if (!message) return null;
 
   const conversation = await Conversation.findOne({
@@ -44,6 +46,9 @@ export function registerMessageActions(io, socket) {
       if (!found) return callback?.({ ok: false, error: "Message not found" });
 
       const { message, conversation } = found;
+      if (message.kind === "system") {
+        return callback?.({ ok: false, error: "You can't do that to a group update" });
+      }
       if (message.deletedAt) {
         return callback?.({ ok: false, error: "You can't react to a deleted message" });
       }
@@ -76,6 +81,9 @@ export function registerMessageActions(io, socket) {
       if (!found) return callback?.({ ok: false, error: "Message not found" });
 
       const { message, conversation } = found;
+      if (message.kind === "system") {
+        return callback?.({ ok: false, error: "You can't do that to a group update" });
+      }
       if (message.sender.toString() !== user.id) {
         return callback?.({ ok: false, error: "You can only delete your own messages" });
       }

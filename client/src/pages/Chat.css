@@ -202,6 +202,11 @@
   font-weight: 500;
 }
 
+.chat-item-preview.typing {
+  color: #a59cff;
+  font-weight: 600;
+}
+
 .chat-item-you {
   color: var(--sidebar-text);
 }
@@ -460,8 +465,25 @@
 
 .chat-title p {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   color: var(--text-3);
+}
+
+.chat-title p.online {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.chat-title p.typing {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chat-header {
+  --avatar-ring: var(--surface);
 }
 
 .conn-pill {
@@ -734,6 +756,40 @@
 
 .msg.mine .bubble-time {
   color: var(--bubble-out-meta);
+}
+
+.typing-bubble {
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.typing-bubble span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: typing-dot 1.2s infinite ease-in-out;
+}
+
+.typing-bubble span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-bubble span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
 }
 
 .jump-btn {

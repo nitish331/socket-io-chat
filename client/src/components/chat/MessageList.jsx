@@ -37,7 +37,7 @@ function buildRows(items) {
   return rows;
 }
 
-function MessageList({ items, currentUserId, intro, loading, showAuthors = true }) {
+function MessageList({ items, currentUserId, intro, loading, typing = false, showAuthors = true }) {
   const listRef = useRef(null);
   const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -55,7 +55,7 @@ function MessageList({ items, currentUserId, intro, loading, showAuthors = true 
     if (atBottomRef.current || mine) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [items, currentUserId]);
+  }, [items, currentUserId, typing]);
 
   function handleScroll() {
     const el = listRef.current;
@@ -134,6 +134,17 @@ function MessageList({ items, currentUserId, intro, loading, showAuthors = true 
               </li>
             );
           })}
+          {typing && (
+            <li className="msg theirs first last typing-row" aria-label="Typing">
+              <div className="msg-content">
+                <div className="bubble typing-bubble">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </li>
+          )}
         </ul>
       </div>
 

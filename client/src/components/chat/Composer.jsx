@@ -1,14 +1,60 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Icon from "../Icon";
 
 const MAX_LENGTH = 2000;
 const MAX_HEIGHT = 180;
+const TYPING_REFRESH_MS = 3000;
+const TYPING_IDLE_MS = 2500;
 
-function Composer({ onSend, disabled, placeholder }) {
+function Composer({ onSend, onTyping, disabled, placeholder }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef(null);
+  const onTypingRef = useRef(onTyping);
+  const typingRef = useRef({ active: false, lastSent: 0, timer: null });
+
+  useEffect(() => {
+    onTypingRef.current = onTyping;
+  }, [onTyping]);
+
+  function stopTyping() {
+    const typing = typingRef.current;
+    clearTimeout(typing.timer);
+    if (typing.active) {
+      typing.active = false;
+      onTypingRef.current?.(false);
+    }
+  }
+
+  useEffect(() => {
+    const typing = typingRef.current;
+    return () => {
+      clearTimeout(typing.timer);
+      if (typing.active) onTypingRef.current?.(false);
+    };
+  }, []);
+
+  function handleChange(e) {
+    const value = e.target.value;
+    setText(value);
+    if (!onTypingRef.current) return;
+
+    if (!value.trim()) {
+      stopTyping();
+      return;
+    }
+
+    const typing = typingRef.current;
+    const now = Date.now();
+    if (!typing.active || now - typing.lastSent > TYPING_REFRESH_MS) {
+      typing.active = true;
+      typing.lastSent = now;
+      onTypingRef.current(true);
+    }
+    clearTimeout(typing.timer);
+    typing.timer = setTimeout(stopTyping, TYPING_IDLE_MS);
+  }
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -21,6 +67,7 @@ function Composer({ onSend, disabled, placeholder }) {
 
   async function submit() {
     if (!canSend) return;
+    stopTyping();
     setSending(true);
     setError("");
 
@@ -62,7 +109,7 @@ function Composer({ onSend, disabled, placeholder }) {
           ref={inputRef}
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}

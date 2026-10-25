@@ -13,6 +13,7 @@ import { otherParticipant } from "../utils/format";
 import "./Chat.css";
 
 const EMPTY_THREAD = { conversationId: null, items: [], loaded: true, error: "" };
+const TYPING_TIMEOUT_MS = 5000;
 
 function upsertConversation(list, conversation) {
   return [conversation, ...list.filter((c) => c.id !== conversation.id)];
@@ -64,8 +65,25 @@ function Chat() {
   const [thread, setThread] = useState(EMPTY_THREAD);
   const [reloadKey, setReloadKey] = useState(0);
   const [unread, setUnread] = useState({});
+  const [presence, setPresence] = useState({});
+  const [typingIn, setTypingIn] = useState({});
   const searchRef = useRef(null);
   const activeIdRef = useRef(null);
+  const watchedRef = useRef(new Set());
+
+  const watchPresence = useCallback((userIds) => {
+    const fresh = userIds.filter((id) => id && !watchedRef.current.has(id));
+    if (fresh.length === 0) return;
+    fresh.forEach((id) => watchedRef.current.add(id));
+
+    socket.timeout(5000).emit("watch_presence", fresh, (err, response) => {
+      if (err || !response?.ok) {
+        fresh.forEach((id) => watchedRef.current.delete(id));
+        return;
+      }
+      setPresence((prev) => ({ ...prev, ...response.presence }));
+    });
+  }, []);
 
   const activeConversation = active?.conversationId
     ? conversations.find((c) => c.id === active.conversationId)
@@ -80,6 +98,19 @@ function Chat() {
   }, [activeConversationId]);
 
   useEffect(() => {
+    const typingTimers = new Map();
+
+    function clearTyping(conversationId) {
+      clearTimeout(typingTimers.get(conversationId));
+      typingTimers.delete(conversationId);
+      setTypingIn((prev) => {
+        if (!prev[conversationId]) return prev;
+        const next = { ...prev };
+        delete next[conversationId];
+        return next;
+      });
+    }
+
     async function loadConversations() {
       try {
         const data = await authRequest("/api/conversations");
@@ -92,6 +123,7 @@ function Chat() {
     }
 
     function onConnect() {
+      watchedRef.current = new Set();
       setIsConnected(true);
       setConnectionIssue("");
       loadConversations();
@@ -100,6 +132,28 @@ function Chat() {
 
     function onDisconnect() {
       setIsConnected(false);
+      typingTimers.forEach(clearTimeout);
+      typingTimers.clear();
+      setTypingIn({});
+    }
+
+    function onPresence({ userId, online, lastSeen }) {
+      setPresence((prev) => ({ ...prev, [userId]: { online, lastSeen } }));
+    }
+
+    function onTyping({ conversationId, isTyping }) {
+      if (!isTyping) {
+        clearTyping(conversationId);
+        return;
+      }
+      clearTimeout(typingTimers.get(conversationId));
+      typingTimers.set(
+        conversationId,
+        setTimeout(() => clearTyping(conversationId), TYPING_TIMEOUT_MS),
+      );
+      setTypingIn((prev) =>
+        prev[conversationId] ? prev : { ...prev, [conversationId]: true },
+      );
     }
 
     function onConnectError(err) {
@@ -112,6 +166,7 @@ function Chat() {
 
     function onReceiveMessage({ message, conversation }) {
       setConversations((prev) => upsertConversation(prev, conversation));
+      if (message.sender.id !== user.id) clearTyping(message.conversationId);
 
       if (message.conversationId === activeIdRef.current) {
         setThread((prev) =>
@@ -132,6 +187,8 @@ function Chat() {
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("receive_message", onReceiveMessage);
+    socket.on("presence", onPresence);
+    socket.on("typing", onTyping);
 
     socket.connect();
 
@@ -140,6 +197,9 @@ function Chat() {
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("receive_message", onReceiveMessage);
+      socket.off("presence", onPresence);
+      socket.off("typing", onTyping);
+      typingTimers.forEach(clearTimeout);
       socket.disconnect();
     };
   }, [logout, user.id]);
@@ -170,6 +230,26 @@ function Chat() {
       cancelled = true;
     };
   }, [activeConversationId, reloadKey]);
+
+  const personId = person?.id ?? null;
+
+  useEffect(() => {
+    if (!isConnected) return;
+    watchPresence(conversations.map((c) => otherParticipant(c, user.id).id));
+  }, [isConnected, conversations, user.id, watchPresence]);
+
+  useEffect(() => {
+    if (isConnected && personId) watchPresence([personId]);
+  }, [isConnected, personId, watchPresence]);
+
+  const sendTyping = useCallback(
+    (isTyping) => {
+      if (activeConversationId && socket.connected) {
+        socket.emit("typing", { conversationId: activeConversationId, isTyping });
+      }
+    },
+    [activeConversationId],
+  );
 
   useEffect(() => {
     const total = Object.values(unread).reduce((sum, n) => sum + n, 0);
@@ -242,6 +322,8 @@ function Chat() {
         loading={!conversationsLoaded}
         activeKey={activeConversationId}
         unread={unread}
+        presence={presence}
+        typingIn={typingIn}
         currentUser={user}
         isConnected={isConnected}
         onOpenConversation={openConversation}
@@ -253,7 +335,13 @@ function Chat() {
       <main className="conversation">
         {person ? (
           <>
-            <ChatHeader person={person} isConnected={isConnected} onBack={closeChat} />
+            <ChatHeader
+              person={person}
+              presence={presence[person.id]}
+              typing={Boolean(activeConversationId && typingIn[activeConversationId])}
+              isConnected={isConnected}
+              onBack={closeChat}
+            />
 
             {!isConnected && (
               <div className="conn-banner" role="status">
@@ -273,6 +361,7 @@ function Chat() {
               items={thread.items}
               loading={!thread.loaded && thread.items.length === 0}
               currentUserId={user.id}
+              typing={Boolean(activeConversationId && typingIn[activeConversationId])}
               showAuthors={false}
               intro={<ChatIntro person={person} />}
             />
@@ -280,6 +369,7 @@ function Chat() {
             <Composer
               key={`composer-${person.id}`}
               onSend={sendMessage}
+              onTyping={activeConversationId ? sendTyping : undefined}
               disabled={!isConnected}
               placeholder={isConnected ? `Message ${person.username}` : "Waiting for connection…"}
             />

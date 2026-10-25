@@ -18,14 +18,14 @@ export async function advanceReceipt(conversationId, userId, { delivered, read }
   let conversation = await Conversation.findOneAndUpdate(
     { _id: conversationId, participants: userId, "receipts.user": userId },
     { $max: max },
-    { returnDocument: "after" },
+    { returnDocument: "after", timestamps: false },
   );
 
   if (!conversation) {
     conversation = await Conversation.findOneAndUpdate(
       { _id: conversationId, participants: userId, "receipts.user": { $ne: userId } },
       { $push: { receipts: { user: userId, deliveredAt: at, readAt: read ? at : null } } },
-      { returnDocument: "after" },
+      { returnDocument: "after", timestamps: false },
     );
   }
 

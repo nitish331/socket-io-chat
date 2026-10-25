@@ -111,11 +111,17 @@ export function registerChatHandlers(io) {
         });
         if (!result) return;
 
-        const rooms = result.participantIds.map(userRoom);
-        io.to(rooms).emit("receipt", {
-          conversationId: result.conversationId,
-          ...result.receipt,
-        });
+        const payload = { conversationId: result.conversationId, ...result.receipt };
+
+        if (kind === "read") {
+          payload.unreadCount = await Message.countDocuments({
+            conversation: result.conversationId,
+            sender: { $ne: user.id },
+            createdAt: { $gt: new Date(result.receipt.readAt) },
+          });
+        }
+
+        io.to(result.participantIds.map(userRoom)).emit("receipt", payload);
       } catch (err) {
         console.error(`Failed to mark ${kind}:`, err.message);
       }

@@ -90,6 +90,7 @@ function later(a, b) {
 export function mergeReceipts(current = [], incoming = []) {
   const byUser = new Map(current.map((r) => [r.userId, r]));
   for (const r of incoming) {
+    if (!r?.userId) continue;
     const prev = byUser.get(r.userId);
     byUser.set(r.userId, {
       userId: r.userId,

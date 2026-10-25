@@ -233,8 +233,12 @@ function Chat() {
             : c,
         ),
       );
-      if (receipt.userId === user.id && receipt.readAt) {
-        setUnread((prev) => withoutKey(prev, receipt.conversationId));
+      if (receipt.userId === user.id && typeof receipt.unreadCount === "number") {
+        setUnread((prev) =>
+          receipt.unreadCount > 0
+            ? { ...prev, [receipt.conversationId]: receipt.unreadCount }
+            : withoutKey(prev, receipt.conversationId),
+        );
       }
     }
 

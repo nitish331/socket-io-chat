@@ -767,7 +767,8 @@
 }
 
 .msg.mine .ticks.read {
-  color: #8be4ff;
+  color: #3fe4ff;
+  filter: drop-shadow(0 0 1px rgba(0, 40, 80, 0.35));
 }
 
 .bubble-time {

@@ -2,12 +2,36 @@ import mongoose from "mongoose";
 
 export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
+export const SYSTEM_ACTIONS = ["created", "added", "removed", "left", "renamed", "promoted"];
+
 const messageSchema = new mongoose.Schema(
   {
     conversation: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Conversation",
       required: true,
+    },
+    kind: {
+      type: String,
+      enum: ["text", "system"],
+      default: "text",
+    },
+    event: {
+      type: new mongoose.Schema(
+        {
+          action: { type: String, enum: SYSTEM_ACTIONS, required: true },
+          targets: [
+            {
+              _id: false,
+              id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+              username: String,
+            },
+          ],
+          name: String,
+        },
+        { _id: false },
+      ),
+      default: null,
     },
     text: {
       type: String,
@@ -75,9 +99,25 @@ messageSchema.methods.toClient = function () {
   const base = {
     id: this._id.toString(),
     conversationId: this.conversation.toString(),
+    kind: this.kind ?? "text",
     sender: senderToClient(this.sender),
     createdAt: this.createdAt.toISOString(),
   };
+
+  if (this.kind === "system") {
+    return {
+      ...base,
+      deleted: false,
+      text: this.text,
+      event: {
+        action: this.event.action,
+        targets: this.event.targets.map((t) => ({ id: t.id.toString(), username: t.username })),
+        name: this.event.name ?? null,
+      },
+      replyTo: null,
+      reactions: [],
+    };
+  }
 
   if (this.deletedAt) {
     return { ...base, deleted: true, text: "", replyTo: null, reactions: [] };

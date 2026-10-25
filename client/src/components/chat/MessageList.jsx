@@ -1,14 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Icon from "../Icon";
 import MessageBubble from "./MessageBubble";
-import { dayLabel, isSameDay, receiptStatus } from "../../utils/format";
+import {
+  dayLabel,
+  groupReceiptStatus,
+  isSameDay,
+  systemMessageText,
+} from "../../utils/format";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const BOTTOM_THRESHOLD = 80;
 const TOP_THRESHOLD = 150;
 const FLASH_MS = 1600;
 
-function buildRows(items) {
+function buildRows(items, myId) {
   const rows = [];
   let prev = null;
   let lastDay = null;
@@ -24,6 +29,12 @@ function buildRows(items) {
       rows.push({ kind: "day", id: `day-${item.id}`, label: dayLabel(item.createdAt) });
       lastDay = item.createdAt;
       prev = null;
+    }
+
+    if (item.kind === "system") {
+      rows.push({ kind: "system", id: item.id, text: systemMessageText(item, myId) });
+      prev = null;
+      continue;
     }
 
     const grouped =
@@ -44,7 +55,7 @@ function MessageList({
   currentUserId,
   intro,
   loading,
-  otherReceipt = null,
+  otherReceipts = [],
   typing = false,
   showAuthors = true,
   hasMore = false,
@@ -95,7 +106,7 @@ function MessageList({
     flashTimerRef.current = setTimeout(() => setHighlightId(null), FLASH_MS);
   }
 
-  const rows = useMemo(() => buildRows(items), [items]);
+  const rows = useMemo(() => buildRows(items, currentUserId), [items, currentUserId]);
   const messages = useMemo(() => items.filter((i) => i.type === "message"), [items]);
   const firstId = messages[0]?.id ?? null;
   const lastId = messages.at(-1)?.id ?? null;
@@ -200,7 +211,7 @@ function MessageList({
                 last={last}
                 currentUserId={currentUserId}
                 showAuthors={showAuthors}
-                status={receiptStatus(item.createdAt, otherReceipt)}
+                status={groupReceiptStatus(item.createdAt, otherReceipts)}
                 menuMode={menu?.id === item.id ? menu.mode : null}
                 highlighted={highlightId === item.id}
                 onMenu={(mode) => setMenu(mode ? { id: item.id, mode } : null)}

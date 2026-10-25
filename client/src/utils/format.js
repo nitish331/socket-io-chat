@@ -107,6 +107,88 @@ export function otherParticipant(conversation, myId) {
   );
 }
 
+export function isGroup(conversation) {
+  return conversation?.type === "group";
+}
+
+export function conversationTitle(conversation, myId) {
+  if (isGroup(conversation)) return conversation.name;
+  return otherParticipant(conversation, myId).username;
+}
+
+export function othersReceipts(conversation, myId) {
+  if (!conversation) return [];
+  const memberIds = new Set(conversation.participants.map((p) => p.id));
+  return (conversation.receipts ?? []).filter(
+    (r) => r.userId !== myId && memberIds.has(r.userId),
+  );
+}
+
+const STATUS_RANK = { sent: 0, delivered: 1, read: 2 };
+
+export function groupReceiptStatus(createdAt, receipts) {
+  if (!receipts || receipts.length === 0) return "sent";
+  let lowest = "read";
+  for (const receipt of receipts) {
+    const status = receiptStatus(createdAt, receipt);
+    if (STATUS_RANK[status] < STATUS_RANK[lowest]) lowest = status;
+  }
+  return lowest;
+}
+
+function nameFor(person, myId, { capital = false } = {}) {
+  if (person?.id === myId) return capital ? "You" : "you";
+  return person?.username ?? "someone";
+}
+
+function joinNames(names) {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+export function systemMessageText(message, myId) {
+  const event = message.event;
+  if (!event) return message.text;
+
+  const actor = nameFor(message.sender, myId, { capital: true });
+  const targets = joinNames(event.targets.map((t) => nameFor(t, myId)));
+
+  switch (event.action) {
+    case "created":
+      return `${actor} created the group "${event.name}"`;
+    case "added":
+      return `${actor} added ${targets}`;
+    case "removed":
+      return `${actor} removed ${targets}`;
+    case "left":
+      return `${actor} left`;
+    case "renamed":
+      return `${actor} changed the group name to "${event.name}"`;
+    case "promoted": {
+      const who = nameFor(event.targets[0], myId, { capital: true });
+      return who === "You" ? "You're now an admin" : `${who} is now an admin`;
+    }
+    default:
+      return message.text;
+  }
+}
+
+export function typingLabel(names) {
+  if (names.length === 0) return "";
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names.length} people are typing…`;
+}
+
+export function memberSummary(conversation, myId) {
+  const others = conversation.participants
+    .filter((p) => p.id !== myId)
+    .map((p) => p.username)
+    .sort();
+  const inGroup = conversation.participants.some((p) => p.id === myId);
+  return [...(inGroup ? ["You"] : []), ...others].join(", ");
+}
+
 export function dayLabel(iso) {
   const date = new Date(iso);
   const today = new Date();

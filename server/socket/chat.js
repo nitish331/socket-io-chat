@@ -5,7 +5,9 @@ import { User } from "../models/User.js";
 import { getPresence, presenceRoom, userConnected, userDisconnected } from "./presence.js";
 import { advanceReceipt } from "./receipts.js";
 import { registerMessageActions } from "./messageActions.js";
-import { userRoom } from "./rooms.js";
+import { registerGroupHandlers } from "./groups.js";
+import { participantRooms, userRoom } from "./rooms.js";
+import { getConversationMembers } from "./typingTargets.js";
 
 const MAX_WATCHED_USERS = 200;
 
@@ -50,9 +52,8 @@ export function registerChatHandlers(io) {
     socket.join(userRoom(user.id));
     userConnected(io, user.id);
 
-    const typingTargets = new Map();
-
     registerMessageActions(io, socket);
+    registerGroupHandlers(io, socket);
 
     socket.on("watch_presence", async (userIds, callback) => {
       if (!Array.isArray(userIds)) {
@@ -77,26 +78,19 @@ export function registerChatHandlers(io) {
       const conversationId = data?.conversationId;
       if (!isValidObjectId(conversationId)) return;
 
-      let otherId = typingTargets.get(conversationId);
-      if (!otherId) {
-        try {
-          const conversation = await Conversation.findOne({
-            _id: conversationId,
-            participants: user.id,
-          })
-            .select("participants")
-            .lean();
-          if (!conversation) return;
-
-          otherId = conversation.participants.map(String).find((id) => id !== user.id);
-          typingTargets.set(conversationId, otherId);
-        } catch (err) {
-          console.error("Failed to resolve typing target:", err.message);
-          return;
-        }
+      let memberIds;
+      try {
+        memberIds = await getConversationMembers(conversationId);
+      } catch (err) {
+        console.error("Failed to resolve typing targets:", err.message);
+        return;
       }
+      if (!memberIds?.includes(user.id)) return;
 
-      io.to(userRoom(otherId)).volatile.emit("typing", {
+      const otherIds = memberIds.filter((id) => id !== user.id);
+      if (otherIds.length === 0) return;
+
+      io.to(otherIds.map(userRoom)).volatile.emit("typing", {
         conversationId,
         userId: user.id,
         isTyping: Boolean(data.isTyping),
@@ -119,6 +113,7 @@ export function registerChatHandlers(io) {
           payload.unreadCount = await Message.countDocuments({
             conversation: result.conversationId,
             sender: { $ne: user.id },
+            kind: { $ne: "system" },
             createdAt: { $gt: new Date(result.receipt.readAt) },
           });
         }
@@ -154,6 +149,7 @@ export function registerChatHandlers(io) {
             ? await Message.exists({
                 _id: data.replyToId,
                 conversation: conversation._id,
+                kind: { $ne: "system" },
                 deletedAt: null,
               })
             : null;
@@ -186,8 +182,7 @@ export function registerChatHandlers(io) {
           conversation: conversation.toClient(),
         };
 
-        const [a, b] = conversation.participants.map((p) => p._id.toString());
-        io.to(userRoom(a)).to(userRoom(b)).emit("receive_message", payload);
+        io.to(participantRooms(conversation)).emit("receive_message", payload);
 
         callback?.({ ok: true, ...payload });
       } catch (err) {

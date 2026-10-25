@@ -22,6 +22,7 @@ router.get("/", async (req, res) => {
       const unreadCount = await Message.countDocuments({
         conversation: c._id,
         sender: { $ne: me },
+        kind: { $ne: "system" },
         createdAt: { $gt: readAt },
       });
       return { ...c.toClient(), unreadCount };

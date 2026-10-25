@@ -6,10 +6,21 @@ import Sidebar from "../components/chat/Sidebar";
 import ChatHeader from "../components/chat/ChatHeader";
 import MessageList from "../components/chat/MessageList";
 import Composer from "../components/chat/Composer";
+import NewGroupModal from "../components/chat/NewGroupModal";
+import GroupInfoPanel from "../components/chat/GroupInfoPanel";
 import Avatar from "../components/Avatar";
 import Icon from "../components/Icon";
 import Logo from "../components/Logo";
-import { mergeReceipts, otherParticipant, receiptOf } from "../utils/format";
+import {
+  isGroup,
+  lastSeenLabel,
+  memberSummary,
+  mergeReceipts,
+  otherParticipant,
+  othersReceipts,
+  receiptOf,
+  typingLabel,
+} from "../utils/format";
 import "./Chat.css";
 
 const EMPTY_THREAD = {
@@ -26,6 +37,7 @@ function newThread(conversationId, items = []) {
   return { ...EMPTY_THREAD, conversationId, items, loaded: false };
 }
 const TYPING_TIMEOUT_MS = 5000;
+const ACK_TIMEOUT_MS = 8000;
 
 function upsertConversation(list, conversation) {
   const existing = list.find((c) => c.id === conversation.id);
@@ -53,7 +65,31 @@ function mergeMessages(fetched, existing) {
   return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-function ChatIntro({ person }) {
+function emitWithAck(event, payload) {
+  return new Promise((resolve) => {
+    socket.timeout(ACK_TIMEOUT_MS).emit(event, payload, (err, response) => {
+      if (err) resolve({ ok: false, error: "Server didn't respond. Try again." });
+      else resolve(response ?? { ok: false, error: "Something went wrong" });
+    });
+  });
+}
+
+function ChatIntro({ conversation, person, myId }) {
+  if (isGroup(conversation)) {
+    const creator = conversation.participants.find((p) => p.id === conversation.createdBy);
+    const who = conversation.createdBy === myId ? "You" : (creator?.username ?? "Someone");
+    return (
+      <div className="chat-intro">
+        <Avatar name={conversation.name} size={72} />
+        <h2>{conversation.name}</h2>
+        <p>
+          {who} created this group · {conversation.participants.length} members. Everyone here
+          gets new messages instantly.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-intro">
       <Avatar name={person.username} size={72} />
@@ -66,18 +102,24 @@ function ChatIntro({ person }) {
   );
 }
 
-function EmptyPane({ onNewChat }) {
+function EmptyPane({ onNewChat, onNewGroup }) {
   return (
     <div className="empty-pane">
       <div className="empty-pane-art">
         <Logo size={64} />
       </div>
       <h2>Relay for web</h2>
-      <p>Pick a chat on the left, or search for anyone by username to start a new conversation.</p>
-      <button type="button" className="primary-btn" onClick={onNewChat}>
-        <Icon name="newChat" size={17} />
-        Start a new chat
-      </button>
+      <p>Pick a chat on the left, search for anyone by username, or start a group.</p>
+      <div className="empty-pane-actions">
+        <button type="button" className="primary-btn" onClick={onNewChat}>
+          <Icon name="newChat" size={17} />
+          Start a new chat
+        </button>
+        <button type="button" className="secondary-btn" onClick={onNewGroup}>
+          <Icon name="users" size={17} />
+          New group
+        </button>
+      </div>
     </div>
   );
 }
@@ -97,8 +139,11 @@ function Chat() {
   const [pageVisible, setPageVisible] = useState(isPageVisible);
   const [replyingTo, setReplyingTo] = useState(null);
   const [notice, setNotice] = useState("");
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const searchRef = useRef(null);
   const activeIdRef = useRef(null);
+  const conversationsRef = useRef([]);
   const watchedRef = useRef(new Set());
   const lastReadMarkRef = useRef("");
   const loadingOlderRef = useRef(false);
@@ -121,25 +166,34 @@ function Chat() {
     ? conversations.find((c) => c.id === active.conversationId)
     : null;
   const activeConversationId = activeConversation?.id ?? null;
-  const person = activeConversation
-    ? otherParticipant(activeConversation, user.id)
-    : (active?.draftUser ?? null);
+  const groupChat = isGroup(activeConversation);
+  const person = groupChat
+    ? null
+    : activeConversation
+      ? otherParticipant(activeConversation, user.id)
+      : (active?.draftUser ?? null);
+  const hasChat = Boolean(activeConversation || person);
 
   useEffect(() => {
     activeIdRef.current = activeConversationId;
   }, [activeConversationId]);
 
   useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
     const typingTimers = new Map();
 
-    function clearTyping(conversationId) {
-      clearTimeout(typingTimers.get(conversationId));
-      typingTimers.delete(conversationId);
+    function removeTyper(conversationId, userId) {
+      const key = `${conversationId}:${userId}`;
+      clearTimeout(typingTimers.get(key));
+      typingTimers.delete(key);
       setTypingIn((prev) => {
-        if (!prev[conversationId]) return prev;
-        const next = { ...prev };
-        delete next[conversationId];
-        return next;
+        const list = prev[conversationId];
+        if (!list?.includes(userId)) return prev;
+        const rest = list.filter((id) => id !== userId);
+        return rest.length ? { ...prev, [conversationId]: rest } : withoutKey(prev, conversationId);
       });
     }
 
@@ -189,18 +243,21 @@ function Chat() {
       setPresence((prev) => ({ ...prev, [userId]: { online, lastSeen } }));
     }
 
-    function onTyping({ conversationId, isTyping }) {
+    function onTyping({ conversationId, userId, isTyping }) {
       if (!isTyping) {
-        clearTyping(conversationId);
+        removeTyper(conversationId, userId);
         return;
       }
-      clearTimeout(typingTimers.get(conversationId));
+      const key = `${conversationId}:${userId}`;
+      clearTimeout(typingTimers.get(key));
       typingTimers.set(
-        conversationId,
-        setTimeout(() => clearTyping(conversationId), TYPING_TIMEOUT_MS),
+        key,
+        setTimeout(() => removeTyper(conversationId, userId), TYPING_TIMEOUT_MS),
       );
       setTypingIn((prev) =>
-        prev[conversationId] ? prev : { ...prev, [conversationId]: true },
+        prev[conversationId]?.includes(userId)
+          ? prev
+          : { ...prev, [conversationId]: [...(prev[conversationId] ?? []), userId] },
       );
     }
 
@@ -217,7 +274,7 @@ function Chat() {
 
       const fromOther = message.sender.id !== user.id;
       const isActive = message.conversationId === activeIdRef.current;
-      if (fromOther) clearTyping(message.conversationId);
+      if (fromOther) removeTyper(message.conversationId, message.sender.id);
 
       if (isActive) {
         setThread((prev) =>
@@ -229,10 +286,12 @@ function Chat() {
       }
 
       if (fromOther && !(isActive && isPageVisible())) {
-        setUnread((prev) => ({
-          ...prev,
-          [message.conversationId]: (prev[message.conversationId] || 0) + 1,
-        }));
+        if (message.kind !== "system") {
+          setUnread((prev) => ({
+            ...prev,
+            [message.conversationId]: (prev[message.conversationId] || 0) + 1,
+          }));
+        }
         socket.emit("mark_delivered", {
           conversationId: message.conversationId,
           upTo: message.createdAt,
@@ -289,6 +348,24 @@ function Chat() {
       }
     }
 
+    function onConversationRemoved({ conversationId, reason }) {
+      const name = conversationsRef.current.find((c) => c.id === conversationId)?.name;
+
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      setUnread((prev) => withoutKey(prev, conversationId));
+      setTypingIn((prev) => withoutKey(prev, conversationId));
+
+      if (activeIdRef.current === conversationId) {
+        setActive(null);
+        setThread(EMPTY_THREAD);
+        setReplyingTo(null);
+        setInfoOpen(false);
+      }
+      if (reason === "removed") {
+        setNotice(name ? `You were removed from "${name}"` : "You were removed from a group");
+      }
+    }
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
@@ -297,6 +374,7 @@ function Chat() {
     socket.on("typing", onTyping);
     socket.on("receipt", onReceipt);
     socket.on("message_updated", onMessageUpdated);
+    socket.on("conversation_removed", onConversationRemoved);
 
     socket.connect();
 
@@ -309,6 +387,7 @@ function Chat() {
       socket.off("typing", onTyping);
       socket.off("receipt", onReceipt);
       socket.off("message_updated", onMessageUpdated);
+      socket.off("conversation_removed", onConversationRemoved);
       typingTimers.forEach(clearTimeout);
       socket.disconnect();
     };
@@ -351,7 +430,9 @@ function Chat() {
 
   useEffect(() => {
     if (!isConnected) return;
-    watchPresence(conversations.map((c) => otherParticipant(c, user.id).id));
+    watchPresence(
+      conversations.flatMap((c) => c.participants.map((p) => p.id)).filter((id) => id !== user.id),
+    );
   }, [isConnected, conversations, user.id, watchPresence]);
 
   useEffect(() => {
@@ -406,9 +487,8 @@ function Chat() {
   }, [notice]);
 
   function emitAction(event, payload) {
-    socket.timeout(5000).emit(event, payload, (err, response) => {
-      if (err) setNotice("Server didn't respond. Try again.");
-      else if (!response?.ok) setNotice(response?.error ?? "Something went wrong");
+    emitWithAck(event, payload).then((response) => {
+      if (!response.ok) setNotice(response.error ?? "Something went wrong");
     });
   }
 
@@ -422,6 +502,7 @@ function Chat() {
 
   function openConversation(id) {
     setReplyingTo(null);
+    setInfoOpen(false);
     setActive({ conversationId: id });
     if (thread.conversationId !== id) {
       setThread(newThread(id));
@@ -465,21 +546,55 @@ function Chat() {
 
   function startChat(target) {
     const existing = conversations.find(
-      (c) => otherParticipant(c, user.id).id === target.id,
+      (c) => !isGroup(c) && otherParticipant(c, user.id).id === target.id,
     );
     if (existing) {
       openConversation(existing.id);
       return;
     }
     setReplyingTo(null);
+    setInfoOpen(false);
     setActive({ draftUser: target });
     setThread(EMPTY_THREAD);
   }
 
   function closeChat() {
     setReplyingTo(null);
+    setInfoOpen(false);
     setActive(null);
     setThread(EMPTY_THREAD);
+  }
+
+  async function createGroup(name, members) {
+    const result = await emitWithAck("create_group", {
+      name,
+      memberIds: members.map((m) => m.id),
+    });
+    if (result.ok) {
+      setConversations((prev) => upsertConversation(prev, result.conversation));
+      setShowNewGroup(false);
+      openConversation(result.conversation.id);
+    }
+    return result;
+  }
+
+  function addMembers(people) {
+    return emitWithAck("add_members", {
+      conversationId: activeConversationId,
+      memberIds: people.map((p) => p.id),
+    });
+  }
+
+  function removeMember(userId) {
+    return emitWithAck("remove_member", { conversationId: activeConversationId, userId });
+  }
+
+  function renameGroup(name) {
+    return emitWithAck("rename_group", { conversationId: activeConversationId, name });
+  }
+
+  function leaveGroup() {
+    return emitWithAck("leave_group", { conversationId: activeConversationId });
   }
 
   function sendMessage(text) {
@@ -518,8 +633,53 @@ function Chat() {
       }
     : null;
 
+  const typingIds = (activeConversationId && typingIn[activeConversationId]) || [];
+  let header = null;
+  if (groupChat) {
+    const typingNames = typingIds
+      .map((id) => activeConversation.participants.find((p) => p.id === id)?.username)
+      .filter(Boolean);
+    header = {
+      title: activeConversation.name,
+      avatarName: activeConversation.name,
+      subtitle: typingNames.length
+        ? typingLabel(typingNames)
+        : memberSummary(activeConversation, user.id),
+      subtitleClass: typingNames.length ? "typing" : "",
+      online: false,
+    };
+  } else if (person) {
+    const status = presence[person.id];
+    let subtitle = `@${person.username}`;
+    let subtitleClass = "";
+    if (typingIds.length) {
+      subtitle = "typing…";
+      subtitleClass = "typing";
+    } else if (status?.online) {
+      subtitle = "online";
+      subtitleClass = "online";
+    } else if (status?.lastSeen) {
+      subtitle = lastSeenLabel(status.lastSeen);
+    }
+    header = {
+      title: person.username,
+      avatarName: person.username,
+      subtitle,
+      subtitleClass,
+      online: Boolean(status?.online),
+    };
+  }
+
+  const chatKey = groupChat ? `group-${activeConversationId}` : person?.id;
+  const noticeBanner = notice && (
+    <div className="conn-banner error" role="alert">
+      <Icon name="alert" size={16} />
+      {notice}
+    </div>
+  );
+
   return (
-    <div className={`workspace ${person ? "has-chat" : ""}`}>
+    <div className={`workspace ${hasChat ? "has-chat" : ""}`}>
       <Sidebar
         conversations={conversations}
         loading={!conversationsLoaded}
@@ -531,19 +691,19 @@ function Chat() {
         isConnected={isConnected}
         onOpenConversation={openConversation}
         onStartChat={startChat}
+        onNewGroup={() => setShowNewGroup(true)}
         onLogout={logout}
         searchRef={searchRef}
       />
 
       <main className="conversation">
-        {person ? (
+        {hasChat ? (
           <>
             <ChatHeader
-              person={person}
-              presence={presence[person.id]}
-              typing={Boolean(activeConversationId && typingIn[activeConversationId])}
+              {...header}
               isConnected={isConnected}
               onBack={closeChat}
+              onOpenInfo={groupChat ? () => setInfoOpen(true) : undefined}
             />
 
             {!isConnected && (
@@ -558,21 +718,16 @@ function Chat() {
                 {thread.error}
               </div>
             )}
-            {notice && (
-              <div className="conn-banner error" role="alert">
-                <Icon name="alert" size={16} />
-                {notice}
-              </div>
-            )}
+            {noticeBanner}
 
             <MessageList
-              key={`messages-${person.id}`}
+              key={`messages-${chatKey}`}
               items={thread.items}
               loading={!thread.loaded && thread.items.length === 0}
               currentUserId={user.id}
-              otherReceipt={receiptOf(activeConversation, user.id, { other: true })}
-              typing={Boolean(activeConversationId && typingIn[activeConversationId])}
-              showAuthors={false}
+              otherReceipts={othersReceipts(activeConversation, user.id)}
+              typing={typingIds.length > 0}
+              showAuthors={groupChat}
               hasMore={thread.hasMore}
               loadingOlder={thread.loadingOlder}
               olderError={thread.olderError}
@@ -581,23 +736,47 @@ function Chat() {
               onReact={reactToMessage}
               onDelete={deleteMessage}
               onNotice={setNotice}
-              intro={<ChatIntro person={person} />}
+              intro={<ChatIntro conversation={activeConversation} person={person} myId={user.id} />}
             />
 
             <Composer
-              key={`composer-${person.id}`}
+              key={`composer-${chatKey}`}
               onSend={sendMessage}
               onTyping={activeConversationId ? sendTyping : undefined}
               replyTo={replyPreview}
               onCancelReply={() => setReplyingTo(null)}
               disabled={!isConnected}
-              placeholder={isConnected ? `Message ${person.username}` : "Waiting for connection…"}
+              placeholder={isConnected ? `Message ${header.title}` : "Waiting for connection…"}
             />
+
+            {groupChat && infoOpen && (
+              <GroupInfoPanel
+                key={activeConversationId}
+                conversation={activeConversation}
+                currentUser={user}
+                presence={presence}
+                onClose={() => setInfoOpen(false)}
+                onRename={renameGroup}
+                onAddMembers={addMembers}
+                onRemoveMember={removeMember}
+                onLeave={leaveGroup}
+              />
+            )}
           </>
         ) : (
-          <EmptyPane onNewChat={() => searchRef.current?.focus()} />
+          <>
+            {noticeBanner}
+            <EmptyPane
+              onNewChat={() => searchRef.current?.focus()}
+              onNewGroup={() => setShowNewGroup(true)}
+            />
+          </>
         )}
       </main>
+
+      {showNewGroup && (
+        <NewGroupModal onClose={() => setShowNewGroup(false)} onCreate={createGroup} />
+      )}
     </div>
   );
 }

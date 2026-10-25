@@ -3,12 +3,20 @@ import Avatar from "../Avatar";
 import Icon from "../Icon";
 import Logo from "../Logo";
 import ThemeToggle from "../ThemeToggle";
-import { listTime, otherParticipant, receiptOf, receiptStatus } from "../../utils/format";
+import {
+  conversationTitle,
+  groupReceiptStatus,
+  isGroup,
+  listTime,
+  otherParticipant,
+  othersReceipts,
+  typingLabel,
+} from "../../utils/format";
 import { useUserSearch } from "./useUserSearch";
 import Ticks from "./Ticks";
 
 function Highlight({ text, query }) {
-  const index = query ? text.indexOf(query) : -1;
+  const index = query ? text.toLowerCase().indexOf(query) : -1;
   if (index === -1) return text;
   return (
     <>
@@ -19,19 +27,57 @@ function Highlight({ text, query }) {
   );
 }
 
+function systemPreview(text, myUsername) {
+  return text.startsWith(`${myUsername} `) ? `You${text.slice(myUsername.length)}` : text;
+}
+
 function ChatItem({
   conversation,
-  currentUserId,
+  currentUser,
   active,
   unread,
   online,
-  typing,
+  typingIds = [],
   query,
   onClick,
 }) {
-  const other = otherParticipant(conversation, currentUserId);
+  const group = isGroup(conversation);
+  const title = conversationTitle(conversation, currentUser.id);
   const last = conversation.lastMessage;
-  const mine = last?.senderId === currentUserId;
+  const mine = last?.senderId === currentUser.id;
+  const nameOf = (id) => conversation.participants.find((p) => p.id === id)?.username;
+
+  const typingNames = typingIds.map(nameOf).filter(Boolean);
+  const typing = typingIds.length > 0;
+  const typingText = group ? typingLabel(typingNames) : "typing…";
+
+  let preview;
+  if (typing) {
+    preview = typingText;
+  } else if (!last) {
+    preview = "No messages yet";
+  } else if (last.kind === "system") {
+    preview = <span className="system-preview">{systemPreview(last.text, currentUser.username)}</span>;
+  } else if (last.deleted) {
+    preview = (
+      <span className="deleted-preview">
+        <Icon name="ban" size={13} />
+        {mine ? "You deleted this message" : "This message was deleted"}
+      </span>
+    );
+  } else {
+    preview = (
+      <>
+        {mine && (
+          <Ticks
+            status={groupReceiptStatus(last.createdAt, othersReceipts(conversation, currentUser.id))}
+          />
+        )}
+        {group && !mine && <span className="chat-item-sender">{nameOf(last.senderId) ?? "Someone"}: </span>}
+        {last.text}
+      </>
+    );
+  }
 
   return (
     <li>
@@ -41,39 +87,17 @@ function ChatItem({
         onClick={onClick}
         aria-current={active ? "page" : undefined}
       >
-        <Avatar name={other.username} size={44} status={online ? "online" : undefined} />
+        <Avatar name={title} size={44} status={!group && online ? "online" : undefined} />
         <span className="chat-item-body">
           <span className="chat-item-top">
             <span className="chat-item-name">
-              <Highlight text={other.username} query={query} />
+              {group && <Icon name="users" size={14} className="chat-item-group-icon" />}
+              <Highlight text={title} query={query} />
             </span>
             {last && <span className="chat-item-time">{listTime(last.createdAt)}</span>}
           </span>
           <span className="chat-item-bottom">
-            <span className={`chat-item-preview ${typing ? "typing" : ""}`}>
-              {typing ? (
-                "typing…"
-              ) : last?.deleted ? (
-                <span className="deleted-preview">
-                  <Icon name="ban" size={13} />
-                  {mine ? "You deleted this message" : "This message was deleted"}
-                </span>
-              ) : last ? (
-                <>
-                  {mine && (
-                    <Ticks
-                      status={receiptStatus(
-                        last.createdAt,
-                        receiptOf(conversation, currentUserId, { other: true }),
-                      )}
-                    />
-                  )}
-                  {last.text}
-                </>
-              ) : (
-                "No messages yet"
-              )}
-            </span>
+            <span className={`chat-item-preview ${typing ? "typing" : ""}`}>{preview}</span>
             {unread > 0 && <span className="unread-badge">{unread > 99 ? "99+" : unread}</span>}
           </span>
         </span>
@@ -110,6 +134,7 @@ function Sidebar({
   isConnected,
   onOpenConversation,
   onStartChat,
+  onNewGroup,
   onLogout,
   searchRef,
 }) {
@@ -119,14 +144,33 @@ function Sidebar({
 
   const matchingChats = q
     ? conversations.filter((c) =>
-        otherParticipant(c, currentUser.id).username.includes(q),
+        conversationTitle(c, currentUser.id).toLowerCase().includes(q),
       )
     : conversations;
 
-  const chatUserIds = new Set(
-    conversations.map((c) => otherParticipant(c, currentUser.id).id),
+  const directChatUserIds = new Set(
+    conversations
+      .filter((c) => !isGroup(c))
+      .map((c) => otherParticipant(c, currentUser.id).id),
   );
-  const newPeople = users.filter((u) => !chatUserIds.has(u.id));
+  const newPeople = users.filter((u) => !directChatUserIds.has(u.id));
+
+  function renderChatItem(c, highlight) {
+    const online = !isGroup(c) && presence[otherParticipant(c, currentUser.id).id]?.online;
+    return (
+      <ChatItem
+        key={c.id}
+        conversation={c}
+        currentUser={currentUser}
+        active={c.id === activeKey}
+        unread={unread[c.id] || 0}
+        online={online}
+        typingIds={Array.isArray(typingIn[c.id]) ? typingIn[c.id] : []}
+        query={highlight}
+        onClick={() => openConversation(c.id)}
+      />
+    );
+  }
 
   function clearSearch() {
     setQuery("");
@@ -149,15 +193,26 @@ function Sidebar({
           <Logo size={30} />
           <span className="brand-name">Relay</span>
         </div>
-        <button
-          type="button"
-          className="icon-btn sidebar-icon-btn"
-          onClick={() => searchRef.current?.focus()}
-          aria-label="New chat"
-          title="New chat"
-        >
-          <Icon name="newChat" />
-        </button>
+        <div className="sidebar-top-actions">
+          <button
+            type="button"
+            className="icon-btn sidebar-icon-btn"
+            onClick={onNewGroup}
+            aria-label="New group"
+            title="New group"
+          >
+            <Icon name="users" />
+          </button>
+          <button
+            type="button"
+            className="icon-btn sidebar-icon-btn"
+            onClick={() => searchRef.current?.focus()}
+            aria-label="New chat"
+            title="New chat"
+          >
+            <Icon name="newChat" />
+          </button>
+        </div>
       </div>
 
       <div className="sidebar-search">
@@ -210,20 +265,7 @@ function Sidebar({
                 <p>Search for someone by username above to start your first conversation.</p>
               </div>
             ) : (
-              <ul className="chat-list">
-                {conversations.map((c) => (
-                  <ChatItem
-                    key={c.id}
-                    conversation={c}
-                    currentUserId={currentUser.id}
-                    active={c.id === activeKey}
-                    unread={unread[c.id] || 0}
-                    online={presence[otherParticipant(c, currentUser.id).id]?.online}
-                    typing={Boolean(typingIn[c.id])}
-                    onClick={() => openConversation(c.id)}
-                  />
-                ))}
-              </ul>
+              <ul className="chat-list">{conversations.map((c) => renderChatItem(c))}</ul>
             )}
           </>
         )}
@@ -233,21 +275,7 @@ function Sidebar({
             {matchingChats.length > 0 && (
               <>
                 <h2 className="sidebar-heading">Chats</h2>
-                <ul className="chat-list">
-                  {matchingChats.map((c) => (
-                    <ChatItem
-                      key={c.id}
-                      conversation={c}
-                      currentUserId={currentUser.id}
-                      active={c.id === activeKey}
-                      unread={unread[c.id] || 0}
-                      online={presence[otherParticipant(c, currentUser.id).id]?.online}
-                      typing={Boolean(typingIn[c.id])}
-                      query={q}
-                      onClick={() => openConversation(c.id)}
-                    />
-                  ))}
-                </ul>
+                <ul className="chat-list">{matchingChats.map((c) => renderChatItem(c, q))}</ul>
               </>
             )}
 

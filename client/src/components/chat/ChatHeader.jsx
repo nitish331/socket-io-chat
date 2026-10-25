@@ -1,16 +1,27 @@
 import Avatar from "../Avatar";
 import Icon from "../Icon";
-import { lastSeenLabel } from "../../utils/format";
 
-function statusText(presence, typing) {
-  if (typing) return { text: "typing…", className: "typing" };
-  if (presence?.online) return { text: "online", className: "online" };
-  if (presence?.lastSeen) return { text: lastSeenLabel(presence.lastSeen), className: "" };
-  return null;
-}
-
-function ChatHeader({ person, presence, typing, isConnected, onBack }) {
-  const status = statusText(presence, typing);
+function ChatHeader({
+  title,
+  avatarName,
+  subtitle,
+  subtitleClass = "",
+  online = false,
+  isConnected,
+  onBack,
+  onOpenInfo,
+}) {
+  const titleContent = (
+    <>
+      <Avatar name={avatarName} size={40} status={online ? "online" : undefined} />
+      <div className="chat-title-text">
+        <h1>{title}</h1>
+        <p className={subtitleClass} aria-live="polite">
+          {subtitle}
+        </p>
+      </div>
+    </>
+  );
 
   return (
     <header className="chat-header">
@@ -23,19 +34,30 @@ function ChatHeader({ person, presence, typing, isConnected, onBack }) {
         <Icon name="arrowLeft" />
       </button>
 
-      <div className="chat-title">
-        <Avatar
-          name={person.username}
-          size={40}
-          status={presence?.online ? "online" : undefined}
-        />
-        <div className="chat-title-text">
-          <h1>{person.username}</h1>
-          <p className={status?.className} aria-live="polite">
-            {status ? status.text : `@${person.username}`}
-          </p>
-        </div>
-      </div>
+      {onOpenInfo ? (
+        <button
+          type="button"
+          className="chat-title clickable"
+          onClick={onOpenInfo}
+          title="Group info"
+        >
+          {titleContent}
+        </button>
+      ) : (
+        <div className="chat-title">{titleContent}</div>
+      )}
+
+      {onOpenInfo && (
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onOpenInfo}
+          aria-label="Group info"
+          title="Group info"
+        >
+          <Icon name="info" />
+        </button>
+      )}
 
       <div className={`conn-pill ${isConnected ? "live" : "down"}`}>
         <span className="conn-dot" />

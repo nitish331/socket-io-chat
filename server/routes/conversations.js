@@ -10,11 +10,24 @@ const MESSAGE_LIMIT = 50;
 router.use(requireAuth);
 
 router.get("/", async (req, res) => {
-  const conversations = await Conversation.find({ participants: req.user._id })
+  const me = req.user._id;
+  const conversations = await Conversation.find({ participants: me })
     .sort({ updatedAt: -1 })
     .populate("participants", "username");
 
-  res.json({ conversations: conversations.map((c) => c.toClient()) });
+  const withUnread = await Promise.all(
+    conversations.map(async (c) => {
+      const readAt = c.receiptFor(me)?.readAt ?? new Date(0);
+      const unreadCount = await Message.countDocuments({
+        conversation: c._id,
+        sender: { $ne: me },
+        createdAt: { $gt: readAt },
+      });
+      return { ...c.toClient(), unreadCount };
+    }),
+  );
+
+  res.json({ conversations: withUnread });
 });
 
 router.get("/:id/messages", async (req, res) => {

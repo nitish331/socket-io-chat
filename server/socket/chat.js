@@ -3,6 +3,7 @@ import { Conversation } from "../models/Conversation.js";
 import { Message } from "../models/Message.js";
 import { User } from "../models/User.js";
 import { getPresence, presenceRoom, userConnected, userDisconnected } from "./presence.js";
+import { advanceReceipt } from "./receipts.js";
 
 export const userRoom = (userId) => `user:${userId}`;
 
@@ -13,7 +14,13 @@ async function findOrCreateConversation(userId, recipientId) {
   try {
     return await Conversation.findOneAndUpdate(
       { key },
-      { $setOnInsert: { key, participants: [userId, recipientId] } },
+      {
+        $setOnInsert: {
+          key,
+          participants: [userId, recipientId],
+          receipts: [{ user: userId }, { user: recipientId }],
+        },
+      },
       { upsert: true, returnDocument: "after" },
     );
   } catch (err) {
@@ -93,6 +100,29 @@ export function registerChatHandlers(io) {
         isTyping: Boolean(data.isTyping),
       });
     });
+
+    async function handleReceipt(data, kind) {
+      const conversationId = data?.conversationId;
+      if (!isValidObjectId(conversationId)) return;
+
+      try {
+        const result = await advanceReceipt(conversationId, user.id, {
+          [kind]: data.upTo ?? new Date(),
+        });
+        if (!result) return;
+
+        const rooms = result.participantIds.map(userRoom);
+        io.to(rooms).emit("receipt", {
+          conversationId: result.conversationId,
+          ...result.receipt,
+        });
+      } catch (err) {
+        console.error(`Failed to mark ${kind}:`, err.message);
+      }
+    }
+
+    socket.on("mark_delivered", (data) => handleReceipt(data, "delivered"));
+    socket.on("mark_read", (data) => handleReceipt(data, "read"));
 
     socket.on("send_message", async (data, callback) => {
       const text = typeof data?.text === "string" ? data.text.trim() : "";

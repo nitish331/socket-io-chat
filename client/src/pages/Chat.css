@@ -207,8 +207,14 @@
   font-weight: 600;
 }
 
-.chat-item-you {
-  color: var(--sidebar-text);
+.chat-item-preview .ticks {
+  margin-right: 4px;
+  vertical-align: -3px;
+  color: var(--sidebar-text-dim);
+}
+
+.chat-item-preview .ticks.read {
+  color: #53bdeb;
 }
 
 .unread-badge {
@@ -745,8 +751,26 @@
   overflow-wrap: anywhere;
 }
 
-.bubble-time {
+.bubble-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   margin-left: auto;
+}
+
+.ticks {
+  display: inline-flex;
+}
+
+.msg.mine .ticks {
+  color: var(--bubble-out-meta);
+}
+
+.msg.mine .ticks.read {
+  color: #8be4ff;
+}
+
+.bubble-time {
   font-size: 11px;
   line-height: 1.8;
   color: var(--text-3);

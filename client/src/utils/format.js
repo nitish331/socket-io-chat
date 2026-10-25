@@ -66,6 +66,40 @@ export function lastSeenLabel(iso) {
   return `last seen ${date.toLocaleDateString([], { day: "numeric", month: "short" })}`;
 }
 
+export function receiptOf(conversation, userId, { other = false } = {}) {
+  return (
+    conversation?.receipts?.find((r) => (other ? r.userId !== userId : r.userId === userId)) ??
+    null
+  );
+}
+
+export function receiptStatus(createdAt, receipt) {
+  if (!receipt) return "sent";
+  const sentAt = new Date(createdAt).getTime();
+  if (receipt.readAt && new Date(receipt.readAt).getTime() >= sentAt) return "read";
+  if (receipt.deliveredAt && new Date(receipt.deliveredAt).getTime() >= sentAt) return "delivered";
+  return "sent";
+}
+
+function later(a, b) {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return new Date(a) >= new Date(b) ? a : b;
+}
+
+export function mergeReceipts(current = [], incoming = []) {
+  const byUser = new Map(current.map((r) => [r.userId, r]));
+  for (const r of incoming) {
+    const prev = byUser.get(r.userId);
+    byUser.set(r.userId, {
+      userId: r.userId,
+      deliveredAt: later(prev?.deliveredAt, r.deliveredAt),
+      readAt: later(prev?.readAt, r.readAt),
+    });
+  }
+  return [...byUser.values()];
+}
+
 export function otherParticipant(conversation, myId) {
   return (
     conversation.participants.find((p) => p.id !== myId) ?? conversation.participants[0]

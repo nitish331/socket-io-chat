@@ -9,14 +9,29 @@ import Composer from "../components/chat/Composer";
 import Avatar from "../components/Avatar";
 import Icon from "../components/Icon";
 import Logo from "../components/Logo";
-import { otherParticipant } from "../utils/format";
+import { mergeReceipts, otherParticipant, receiptOf } from "../utils/format";
 import "./Chat.css";
 
 const EMPTY_THREAD = { conversationId: null, items: [], loaded: true, error: "" };
 const TYPING_TIMEOUT_MS = 5000;
 
 function upsertConversation(list, conversation) {
-  return [conversation, ...list.filter((c) => c.id !== conversation.id)];
+  const existing = list.find((c) => c.id === conversation.id);
+  const merged = existing
+    ? { ...conversation, receipts: mergeReceipts(existing.receipts, conversation.receipts) }
+    : conversation;
+  return [merged, ...list.filter((c) => c.id !== conversation.id)];
+}
+
+function withoutKey(obj, key) {
+  if (!obj[key]) return obj;
+  const next = { ...obj };
+  delete next[key];
+  return next;
+}
+
+function isPageVisible() {
+  return document.visibilityState === "visible";
 }
 
 function mergeMessages(fetched, existing) {
@@ -67,9 +82,11 @@ function Chat() {
   const [unread, setUnread] = useState({});
   const [presence, setPresence] = useState({});
   const [typingIn, setTypingIn] = useState({});
+  const [pageVisible, setPageVisible] = useState(isPageVisible);
   const searchRef = useRef(null);
   const activeIdRef = useRef(null);
   const watchedRef = useRef(new Set());
+  const lastReadMarkRef = useRef("");
 
   const watchPresence = useCallback((userIds) => {
     const fresh = userIds.filter((id) => id && !watchedRef.current.has(id));
@@ -115,6 +132,22 @@ function Chat() {
       try {
         const data = await authRequest("/api/conversations");
         setConversations(data.conversations);
+        setUnread(
+          Object.fromEntries(
+            data.conversations
+              .filter((c) => c.unreadCount > 0)
+              .map((c) => [c.id, c.unreadCount]),
+          ),
+        );
+
+        for (const c of data.conversations) {
+          const last = c.lastMessage;
+          if (!last || last.senderId === user.id) continue;
+          const mine = receiptOf(c, user.id);
+          if (!mine?.deliveredAt || new Date(mine.deliveredAt) < new Date(last.createdAt)) {
+            socket.emit("mark_delivered", { conversationId: c.id, upTo: last.createdAt });
+          }
+        }
       } catch (err) {
         if (err.status === 401) logout();
       } finally {
@@ -166,20 +199,42 @@ function Chat() {
 
     function onReceiveMessage({ message, conversation }) {
       setConversations((prev) => upsertConversation(prev, conversation));
-      if (message.sender.id !== user.id) clearTyping(message.conversationId);
 
-      if (message.conversationId === activeIdRef.current) {
+      const fromOther = message.sender.id !== user.id;
+      const isActive = message.conversationId === activeIdRef.current;
+      if (fromOther) clearTyping(message.conversationId);
+
+      if (isActive) {
         setThread((prev) =>
           prev.conversationId === message.conversationId &&
           !prev.items.some((i) => i.id === message.id)
             ? { ...prev, items: [...prev.items, { type: "message", ...message }] }
             : prev,
         );
-      } else if (message.sender.id !== user.id) {
+      }
+
+      if (fromOther && !(isActive && isPageVisible())) {
         setUnread((prev) => ({
           ...prev,
           [message.conversationId]: (prev[message.conversationId] || 0) + 1,
         }));
+        socket.emit("mark_delivered", {
+          conversationId: message.conversationId,
+          upTo: message.createdAt,
+        });
+      }
+    }
+
+    function onReceipt(receipt) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === receipt.conversationId
+            ? { ...c, receipts: mergeReceipts(c.receipts, [receipt]) }
+            : c,
+        ),
+      );
+      if (receipt.userId === user.id && receipt.readAt) {
+        setUnread((prev) => withoutKey(prev, receipt.conversationId));
       }
     }
 
@@ -189,6 +244,7 @@ function Chat() {
     socket.on("receive_message", onReceiveMessage);
     socket.on("presence", onPresence);
     socket.on("typing", onTyping);
+    socket.on("receipt", onReceipt);
 
     socket.connect();
 
@@ -199,6 +255,7 @@ function Chat() {
       socket.off("receive_message", onReceiveMessage);
       socket.off("presence", onPresence);
       socket.off("typing", onTyping);
+      socket.off("receipt", onReceipt);
       typingTimers.forEach(clearTimeout);
       socket.disconnect();
     };
@@ -242,14 +299,41 @@ function Chat() {
     if (isConnected && personId) watchPresence([personId]);
   }, [isConnected, personId, watchPresence]);
 
-  const sendTyping = useCallback(
-    (isTyping) => {
-      if (activeConversationId && socket.connected) {
-        socket.emit("typing", { conversationId: activeConversationId, isTyping });
-      }
-    },
-    [activeConversationId],
-  );
+  function sendTyping(isTyping) {
+    if (activeConversationId && socket.connected) {
+      socket.emit("typing", { conversationId: activeConversationId, isTyping });
+    }
+  }
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      setPageVisible(isPageVisible());
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  const myReadAt = receiptOf(activeConversation, user.id)?.readAt ?? null;
+
+  useEffect(() => {
+    if (!activeConversationId || !pageVisible || !isConnected) return;
+    if (thread.conversationId !== activeConversationId) return;
+
+    const latestFromOther = thread.items.findLast(
+      (i) => i.type === "message" && i.sender.id !== user.id,
+    );
+    if (!latestFromOther) return;
+    if (myReadAt && new Date(myReadAt) >= new Date(latestFromOther.createdAt)) return;
+
+    const markKey = `${activeConversationId}:${latestFromOther.id}`;
+    if (lastReadMarkRef.current === markKey) return;
+    lastReadMarkRef.current = markKey;
+
+    socket.emit("mark_read", {
+      conversationId: activeConversationId,
+      upTo: latestFromOther.createdAt,
+    });
+  }, [activeConversationId, pageVisible, isConnected, thread, myReadAt, user.id]);
 
   useEffect(() => {
     const total = Object.values(unread).reduce((sum, n) => sum + n, 0);
@@ -261,12 +345,7 @@ function Chat() {
     if (thread.conversationId !== id) {
       setThread({ conversationId: id, items: [], loaded: false, error: "" });
     }
-    setUnread((prev) => {
-      if (!prev[id]) return prev;
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    setUnread((prev) => withoutKey(prev, id));
   }
 
   function startChat(target) {
@@ -361,6 +440,7 @@ function Chat() {
               items={thread.items}
               loading={!thread.loaded && thread.items.length === 0}
               currentUserId={user.id}
+              otherReceipt={receiptOf(activeConversation, user.id, { other: true })}
               typing={Boolean(activeConversationId && typingIn[activeConversationId])}
               showAuthors={false}
               intro={<ChatIntro person={person} />}

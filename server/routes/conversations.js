@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { isValidObjectId } from "mongoose";
 import { Conversation } from "../models/Conversation.js";
-import { Message } from "../models/Message.js";
+import { Message, MESSAGE_POPULATE } from "../models/Message.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
-const MESSAGE_LIMIT = 50;
+const PAGE_SIZE = 30;
+const MAX_PAGE_SIZE = 100;
 
 router.use(requireAuth);
 
@@ -41,12 +42,32 @@ router.get("/:id/messages", async (req, res) => {
     return res.status(404).json({ error: "Conversation not found" });
   }
 
-  const latest = await Message.find({ conversation: id })
-    .sort({ createdAt: -1 })
-    .limit(MESSAGE_LIMIT)
-    .populate("sender", "username");
+  const limit = Math.min(Math.max(Number(req.query.limit) || PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const filter = { conversation: id };
 
-  res.json({ messages: latest.reverse().map((m) => m.toClient()) });
+  const { before } = req.query;
+  if (before) {
+    const anchor = isValidObjectId(before)
+      ? await Message.findOne({ _id: before, conversation: id }).select("createdAt")
+      : null;
+    if (!anchor) {
+      return res.status(400).json({ error: "Invalid 'before' cursor" });
+    }
+    filter.$or = [
+      { createdAt: { $lt: anchor.createdAt } },
+      { createdAt: anchor.createdAt, _id: { $lt: anchor._id } },
+    ];
+  }
+
+  const page = await Message.find(filter)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(limit + 1)
+    .populate(MESSAGE_POPULATE);
+
+  const hasMore = page.length > limit;
+  const messages = page.slice(0, limit).reverse();
+
+  res.json({ messages: messages.map((m) => m.toClient()), hasMore });
 });
 
 export default router;

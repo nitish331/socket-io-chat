@@ -6,7 +6,7 @@ const MAX_HEIGHT = 180;
 const TYPING_REFRESH_MS = 3000;
 const TYPING_IDLE_MS = 2500;
 
-function Composer({ onSend, onTyping, disabled, placeholder }) {
+function Composer({ onSend, onTyping, disabled, placeholder, replyTo, onCancelReply }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -17,6 +17,11 @@ function Composer({ onSend, onTyping, disabled, placeholder }) {
   useEffect(() => {
     onTypingRef.current = onTyping;
   }, [onTyping]);
+
+  const replyId = replyTo?.id ?? null;
+  useEffect(() => {
+    if (replyId) inputRef.current?.focus();
+  }, [replyId]);
 
   function stopTyping() {
     const typing = typingRef.current;
@@ -86,6 +91,8 @@ function Composer({ onSend, onTyping, disabled, placeholder }) {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
+    } else if (e.key === "Escape" && replyTo) {
+      onCancelReply?.();
     }
   }
 
@@ -101,6 +108,25 @@ function Composer({ onSend, onTyping, disabled, placeholder }) {
         <div className="composer-error" role="alert">
           <Icon name="alert" size={15} />
           {error}
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="reply-bar">
+          <Icon name="reply" size={16} />
+          <div className="reply-bar-body">
+            <span className="reply-bar-name">Replying to {replyTo.name}</span>
+            <span className="reply-bar-text">{replyTo.text}</span>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onCancelReply}
+            aria-label="Cancel reply"
+            title="Cancel reply (Esc)"
+          >
+            <Icon name="x" size={16} />
+          </button>
         </div>
       )}
 
